@@ -1,6 +1,6 @@
 ***
 # Introduction
-**Scripts used to process and analyze Liver RNA-seq data from Yang et al**
+**Scripts used to process and analyze Liver short-read RNA-seq data (obtained from Yang et al) and cerebellum RNA-seq data**
 
 ## Packages
 ### Linux packages
