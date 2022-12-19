@@ -5,8 +5,8 @@
 ```{r}
 library(openxlsx)
 library(tibble)
-library(ImpulseDE2)
-library(ComplexHeatmap)
+library(ImpulseDE2) #/0.99/10 
+library(ComplexHeatmap) #/3.16
 library(DESeq2) #/1.30.1
 library(plotrix)
 library(reshape)
