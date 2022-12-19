@@ -57,7 +57,7 @@ write.xlsx(merged_liver, "/path/Liver/Liver_GTEx_phenotype_FASTDEATH.xlsx")
 ```{bash}
 #SubjID
 #Brain GTEx is the samples from the gene read counts- with two columns - to match to phenotype data
-Brain_GTEx <- read.xlsx("C:/Users/occeanjr/Documents/GTEx_data/Brain_cortex/Brain_GTEx_RNAsamp.xlsx")
+Brain_GTEx <- read.xlsx("/path/Brain_cortex/Brain_GTEx_RNAsamp.xlsx")
 
 merged_Brain <- merge(Brain_GTEx, GTEx_age_sub, by.x = "SUBJID")
 
@@ -454,7 +454,7 @@ TukeyHSD(Liver_anova2)
 # Heart
 ```{r}
 Heart_GTEx <- read.xlsx("/path/Heart/gene_reads_2017-06-05_v8_heart_left_ventricle_filtered_proteincoding_FASTDEATH.xlsx")
-Heart_phenotype <- read.xlsx("/Users/jamesoccean/Desktop/Home_analyses/GTEx/Heart_leftventricle_GTEx_phenotype.xlsx")
+Heart_phenotype <- read.xlsx("/path/Heart/Heart_leftventricle_GTEx_phenotype.xlsx")
 
 #Moving genes names to row
 row.names(Heart_GTEx) <- NULL
