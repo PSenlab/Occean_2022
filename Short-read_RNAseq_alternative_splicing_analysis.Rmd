@@ -1,0 +1,85 @@
+***
+# Introduction
+**Scripts used to process and analyze short-read RNA-seq data for alternative splicing events**
+
+## Packages
+### Linux packages
+```{bash}
+STAR/2.7.5b
+samtools/1.10
+rmats/4.1.1
+```
+
+```{bash}
+##== linux command ==##
+path="/path"
+#text file with the names of all the RNA-seq samples
+#RNAseq_names.txt
+```
+
+# Re-aligned liver short-read RNA-seq data with additional parameters
+```{bash}
+for sample_names in $(cat RNAseq_names.txt)
+do
+   STAR --genomeDir ${path}/STAR_genome_mm10_ercc/star_genome \
+   --readFilesIn ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R1_paired.fq.gz \
+   ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R2_paired.fq.gz \
+   --readFilesCommand zcat --outTmpDir ${path}/bam_cuff/logs/${sample_names}_STAR --outSAMunmapped Within \
+   --outFilterType BySJout --outFilterMultimapNmax 20 --outFilterMismatchNmax 999 \
+   --outFilterMismatchNoverLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 \
+   --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --sjdbScore 1 --runThreadN 24 \
+   --outSAMtype BAM SortedByCoordinate --outSAMstrandField intronMotif --outSAMattrIHstart 0  --alignSoftClipAtReferenceEnds No \
+   --quantMode TranscriptomeSAM --sjdbGTFfile ${path}/mm10_ERCC_ref/gencode_vM23_noM_annotation.gtf --sjdbGTFfeatureExon exon \
+   --outFileNamePrefix ${path}/bam_cuff/${sample_names}_run1_
+done
+
+#Run2
+for sample_names in $(cat RNAseq_names.txt)
+do
+   STAR --genomeDir ${path}/STAR_genome_mm10_ercc/star_genome \
+   --readFilesIn ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R1_paired.fq.gz \
+   ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R2_paired.fq.gz \
+   --readFilesCommand zcat --outTmpDir ${path}/bam_cuff/logs/${sample_names}_STAR --outSAMunmapped Within \
+   --outFilterType BySJout --outFilterMultimapNmax 20 --outFilterMismatchNmax 999 \
+   --outFilterMismatchNoverLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 \
+   --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --sjdbScore 1 --runThreadN 24\
+   --outSAMtype BAM SortedByCoordinate --outSAMstrandField intronMotif --outSAMattrIHstart 0  --alignSoftClipAtReferenceEnds No \
+   --quantMode TranscriptomeSAM --sjdbGTFfile ${path}/mm10_ERCC_ref/gencode_vM23_noM_annotation.gtf --sjdbGTFfeatureExon exon \
+   --outFileNamePrefix ${path}/bam_cuff/${sample_names}_run2_
+done
+```
+
+# Filter bam files
+```{bash}
+for sample_names in $(cat RNAseq_names.txt)
+do
+#run1
+  samtools view -@ 12 -b -f 2 -q 10 ${path}/bam_cuff/${sample_names}_run1_Aligned.sortedByCoord.out.bam | \
+  samtools view -@ 12 -b  >| ${path}/bam_cuff/${sample_names}_run1_filtered.bam
+  
+#run2
+  samtools view -@ 12 -b -f 2 -q 10 ${path}/bam_cuff/${sample_names}_run2_Aligned.sortedByCoord.out.bam | \
+  samtools view -@ 12 -b  >| ${path}/bam_cuff/${sample_names}_run2_filtered.bam
+done
+```
+
+# Alternative splicing anaysis with rMats
+```{bash}
+cp -r $RMATS_DATA/* .
+cp -r $RMATS_SRC/* .  
+make
+source ./setup_environment.sh
+
+path="/path"
+export TMPDIR=/lscratch/$SLURM_JOBID
+
+#TESTING
+./test_rmats
+
+#Running with samples
+./run_rmats --b1 ${path}/rmaps_analysis/Old_RNA_bam.txt --b2 ${path}/rmaps_analysis/Young_RNA_bam.txt \
+--gtf ${path}/mm10_ERCC_ref/gencode_vM23_noM_annotation.gtf --od ${path}/rmaps_analysis/output -t paired \
+--nthread $SLURM_CPUS_PER_TASK --readLength 37 --variable-read-length --cstat 0.0001 \
+--tmp $TMPDIR
+```
+
