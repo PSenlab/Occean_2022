@@ -19,11 +19,7 @@ macs/2.2.7.1
 ```{r}
 # R packages
 library(tidyverse)
-library(viridisLite)
-library(viridis)
-library(ggpubr)
-library(corrplot)
-library(DiffBind)
+library(DiffBind) #/3.0.15
 library(openxlsx)
 ```
 
