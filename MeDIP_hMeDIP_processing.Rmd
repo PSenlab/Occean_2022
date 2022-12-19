@@ -1,0 +1,365 @@
+***
+# Introduction
+**Scripts used to process and analyze hMeDIP and MeDIP-seq data**
+
+## Packages
+```{bash}
+# Biowulf packages 
+trimgalore/0.6.6
+fastqc/0.11.9
+multiqc/1.9
+bowtie/2
+samtools/1.9
+picard/2.23.7
+bedtools/2.30.0
+deeptools/3.5.0
+```
+
+```{r}
+# R packages
+library(tidyverse)
+library(viridisLite)
+library(viridis)
+library(ggpubr)
+library(corrplot)
+```
+
+# Data Pre-processing
+```{bash}
+##== linux command ==##
+path="/path"
+
+#text file with the names of all the samples
+#hMeDIP_Names.txt
+```
+
+## Adapter trimming
+```{bash}
+##== linux command ==##
+mkdir -p ${path}/fastq/adapt_trim
+
+for Sample_names in $(cat Sample_names.txt)
+do
+  echo "fastq: " $Sample_names
+  trim_galore ${path}/fastq/${Sample_names}_R?.fastq.gz --illumina -o ${path}/fastq/adapt_trim/
+done
+```
+
+## FastQC on resulting adapter trimmed FastQ files
+```{bash}
+##== linux command ==##
+mkdir -p ${path}/fastq/adapt_trim/fastqc
+TMP=/lscratch/$SLURM_JOB_ID
+
+for Sample_names in $(cat Sample_names.txt)
+do
+  fastqc -o ${path}/fastq/adapt_trim/fastqc/ -d $TMP -t 12 --noextract \
+  -f fastq ${path}/fastq/adapt_trim/${Sample_names}_R?.fq.gz
+done
+```
+
+## MultiQC to summarize QC data
+```{bash}
+##== linux command ==##
+multiqc ${path}/fastq/adapt_trim/fastqc/ -n ${path}/fastq/adapt_trim/fastqc/multiqc_hMeDIP
+```
+
+# Genome Alignment
+## Bowtie2 alignment to mm10
+```{bash}
+##== linux command ==##
+mkdir -p ${path}/bam
+mkdir -p ${path}/bam/bowtie2_summary
+mkdir -p ${path}/bam/fragmentLen
+
+#mm10 bowtie2 index
+export BOWTIE2_INDEXES=/fdb/igenomes/Mus_musculus/UCSC/mm10/Sequence/Bowtie2Index/
+
+for Sample_names in $(cat Sample_names.txt)
+do
+  bowtie2 -p 24 --end-to-end --no-mixed --no-discordant --very-sensitive -I 10 -X 700 \
+  --phred33 -x genome -1 ${path}/fastq/adapt_trim/${Sample_names}_R1.fq.gz -2 ${path}/fastq/adapt_trim/${Sample_names}_R2.fq.gz \
+  -S ${path}/bam/${Sample_names}.sam &> ${path}/bam/bowtie2_summary/${Sample_names}_bowtie2.txt 
+  
+  #Extract the 9th column from the alignment sam file which is the fragment length
+  samtools view -@ 24 -h -F 4 -q 10 -bS ${path}/bam/${Sample_names}.sam | \
+  awk -F'\t' 'function abs(x){return ((x < 0.0) ? -x : x)} {print abs($9)}' | \ 
+  sort | uniq -c | awk -v OFS="\t" '{print $2, $1/2}' > ${path}/bam/${Sample_names}_fragmentLen.txt
+ 
+  #convert sam to filtered bam
+  samtools view -@ 24 -h -F 4 -q 10 -bS ${path}/bam/${Sample_names}.sam > ${path}/bam/fragmentLen/${Sample_names}_filtered.bam
+  rm ${path}/bam/${Sample_names}.sam
+done
+```
+
+## Report and Visualize mapping summary
+### Sequencing depth
+```{r}
+##=== R command ===## 
+ageList = c("Y", "O")
+sampleList = c("5hmC", "input")
+repList = c("1","2","3", "4")
+projPath = "/path"
+```
+
+### Bowtie2 results summary
+```{r}
+##=== R command ===## 
+alignResult = c()
+for(age in ageList){
+  for(sample in sampleList){
+    for(rep in repList){
+  alignRes = read.table(paste0(projPath, "/bowtie2_summary/", age, "_", sample, "_", rep, "_bowtie2.txt"), header = FALSE, fill = TRUE)
+  alignRate = substr(alignRes$V1[6], 1, nchar(as.character(alignRes$V1[6]))-1)
+  alignResult = data.frame(Sample = sample, Replicate = rep, Age = age,
+                           SequencingDepth = alignRes$V1[1] %>% as.character %>% as.numeric, 
+                           MappedFragNum_mm10 = alignRes$V1[4] %>% as.character %>% as.numeric + alignRes$V1[5] %>% as.character %>% as.numeric, 
+                           AlignmentRate_mm10 = alignRate %>% as.numeric)  %>% rbind(alignResult, .)
+    }}}
+alignResult$Sample = factor(alignResult$Sample, levels = sampleList)
+alignResult %>% mutate(AlignmentRate_mm10 = paste0(AlignmentRate_mm10, "%"))
+```
+
+### Sequencing depth boxplot
+```{r}
+##=== R command ===## 
+#Figure theme
+theme_USGS_box <- function(base_family = "sans", ...){
+  theme_bw(base_family = base_family, ...) +
+  theme(
+    panel.grid = element_blank(),
+    legend.background = element_rect(color = "black"),
+    axis.text.y = element_text(margin=unit(c(0.3,0.3,0.3,0.3), "cm")), 
+    axis.text.x = element_text(margin=unit(c(0.05,0.05,0.05,0.05), "cm"))
+  )
+}
+
+#Young as base level
+alignResult$Age <- as.factor(alignResult$Age)
+alignResult$Age <- relevel(alignResult$Age, ref = "Y")
+
+pd = position_dodge(width = 0.85)
+
+#Figures
+fig1_hMe <- alignResult %>% ggplot(aes(x = Sample, y = SequencingDepth/1000000, fill =Age)) +
+  geom_boxplot(position=pd, coef=6) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) + 
+  ylab("Sequencing Depth per Million") +
+  xlab("") + 
+  ggtitle("A. Sequencing Depth")
+
+fig2_hMe <- alignResult %>% ggplot(aes(x = Sample, y = MappedFragNum_mm10/1000000, fill = Age)) +
+  geom_boxplot(position=pd, coef=6) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) +
+  ylab("Mapped Fragments per Million") +
+  xlab("") +
+  ggtitle("B. Alignable Fragment (mm10)")
+
+fig3_hMe <- alignResult %>% ggplot(aes(x = Sample, y = AlignmentRate_mm10, fill = Age)) +
+  geom_boxplot(position=pd, coef=6) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) +
+  ylab("% of Mapped Fragments") +
+  xlab("") +
+  ggtitle("C. Alignment Rate (mm10)")
+```
+
+```{r}
+#Statistical test
+hmC <- subset(alignResult, Sample == "5hmC")
+Input <- subset(alignResult, Sample == "input")
+
+#Seq depth
+t.test(hmC$SequencingDepth ~ hmC$Age)
+t.test(Input$SequencingDepth ~ Input$Age)
+
+#Mapped Fragment number
+t.test(hmC$MappedFragNum_mm10 ~ hmC$Age)
+t.test(Input$MappedFragNum_mm10 ~ Input$Age)
+
+#Alignment rate
+t.test(hmC$AlignmentRate_mm10 ~ hmC$Age)
+t.test(Input$AlignmentRate_mm10 ~ Input$Age)
+```
+
+### Report and Visualize fragment length summary
+```{r}
+##=== R command ===## 
+## Collect the fragment size information
+fragLen = c()
+for(age in ageList){
+  for(sample in sampleList){
+    for(rep in repList){
+        fragLen = read.table(paste0(projPath, "/fragmentLen/", age, "_", sample, "_", rep, "_fragmentLen.txt"), header = FALSE) %>% 
+        mutate(fragLen = V1 %>% as.numeric, fragCount = V2 %>% as.numeric, Weight = as.numeric(V2)/sum(as.numeric(V2)), Sample = sample, Replicate = rep, Age = age) %>% 
+        rbind(fragLen, .) 
+    }}}
+
+#Young as base level
+fragLen$Age <- as.factor(fragLen$Age)
+fragLen$Age <- relevel(fragLen$Age, ref = "Y")
+
+fig5A = fragLen %>% ggplot(aes(x = Sample, y = fragLen, weight = Weight, fill = Age)) +
+    geom_violin(bw = 5) +
+    scale_y_continuous(breaks = seq(0, 800, 50)) +
+    scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+    theme_USGS_box(base_size = 15) +
+    ggpubr::rotate_x_text(angle = 20) +
+    ylab("Fragment Length") +
+    xlab("")
+```
+
+```{r}
+#Subset to have hmC and input in different groups
+hmC_frag <- subset(fragLen, Sample == "5hmC")
+Input_frag <- subset(fragLen, Sample == "input")
+
+#Alignment rate
+t.test(hmC_frag$fragLen ~ hmC_frag$Age)
+t.test(Input_frag$fragLen ~ Input_frag$Age)
+```
+
+#Sorting, keeping only uniquely mapped reads, and removing duplicates
+```{bash}
+##== linux command ==##
+
+for Sample_names in $(cat Sample_names.txt)
+do 
+  sambamba sort -t 2 -o ${path}/bam/${Sample_names}_sorted.bam ${path}/bam/${Sample_names}_filtered.bam
+  sambamba view -h -t 2 -f bam -F "[XS] == null and not unmapped and not duplicate" \
+  ${path}/bam/${Sample_names}_sorted.bam > ${path}/bam/${Sample_names}_unique_noDUP.bam
+  
+  ##To remove filtered and sorted bam files
+  rm ${path}/bam/${Sample_names}_filtered.bam
+  rm ${path}/bam/${Sample_names}_sorted.bam
+done
+```
+
+### Report and visualize the duplication rate and unique library size 
+#### Duplication results summary
+```{r}
+##=== R command ===## 
+dupResult = c()
+for(age in ageList){
+  for(sample in sampleList){
+  for(rep in repList){
+  dupRes = read.table(paste0(projPath, "/picard_summary/", age, "_", sample, "_", rep, "_noDUP.txt"), header = #TRUE, fill = TRUE)
+  dupResult = data.frame(Sample = sample, Replicate = rep, Age=age, MappedFragNum_mm10 = dupRes$READ_PAIRS_EXAMINED[1] %>% as.character %>% 
+  as.numeric, DuplicationRate = dupRes$PERCENT_DUPLICATION[1] %>% as.character %>% as.numeric * 100, EstimatedLibrarySize = dupRes$ESTIMATED_LIBRARY_SIZE[1] %>% as.character %>% as.numeric) %>% 
+  mutate(UniqueFragNum = MappedFragNum_mm10 * (1-DuplicationRate/100))  %>% rbind(dupResult, .)
+}}}
+dupResult
+```
+
+#### Duplication boxplots
+```{r}
+##=== R command ===## 
+#Young as first
+dupResult$Age <- as.factor(dupResult$Age)
+dupResult$Age <- relevel(dupResult$Age, ref = "Y")
+
+pd = position_dodge(width = 0.85)
+
+fig4_hMe = dupResult %>% ggplot(aes(x = Sample, y = DuplicationRate, fill = Age)) +
+  geom_boxplot(position=pd) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) +
+  ylab("Duplication Rate (%)") +
+  xlab("") 
+
+fig5_hMe= dupResult %>% ggplot(aes(x = Sample, y = EstimatedLibrarySize, fill = Age)) +
+  geom_boxplot(position=pd) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) +
+  ylab("Estimated Library Size") +
+  xlab("") 
+
+
+fig6_hMe = dupResult %>% ggplot(aes(x = Sample, y = UniqueFragNum, fill = Age)) +
+  geom_boxplot(position=pd, coef=6) +
+  expand_limits(y = 0) +
+  geom_point(pch = 21, position = position_jitterdodge())+
+  scale_fill_manual(values= c("darkgray", "red"), 
+                       name="Age",
+                       breaks=c("Y", "O"),
+                       labels=c("Young", "Old")) +
+  theme_USGS_box(base_size = 15) +
+  ylab("# of Unique Fragments") +
+  xlab("")
+```
+
+## Remove ENCODE blacklisted regions from Bam files
+```{bash}
+wget -O ${path}/bam/ENCFF547MET.bed.gz https://www.encodeproject.org/files/ENCFF547MET/@@download/ENCFF547MET.bed.gz
+gunzip ${path}/bam/ENCFF547MET.bed.gz
+BLACKR=${path}/bam/ENCFF547MET.bed
+
+for Sample_names in $(cat Sample_names.txt)
+do
+  bedtools intersect -a ${path}/bam/${Sample_names}_noDUP.bam -b $BLACKR -v > ${path}/bam/${Sample_names}_noDUP_B.bam
+  rm ${path}/bam/${Sample_names}_noDUP.bam 
+done
+```
+
+# Generate browser tracks
+## Index bam files
+```{bash}
+for Sample_names in $(cat Sample_names.txt)
+do
+  samtools index ${path}/bam/${Sample_names}_noDUP_B.bam
+done
+```
+
+## Generate bigWig files
+```{bash}
+mkdir -p ${path}/bigwig
+
+for Sample_names in $(cat Sample_names.txt)
+do
+  bamCoverage -b ${path}/bam/${Sample_names}_noDUP_B.bam -o ${path}/bigwig/${Sample_names}.bw -of bigwig \
+  --effectiveGenomeSize 1870000000 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
+done
+```
+
+# Assess replicate reproducibility 
+```{bash}
+INPUT1=${path}/bigwig/*.bw
+
+#Creating npz file
+multiBigwigSummary bins -b $INPUT1 -o ${path}/bigwig/hMeDIP_bigwig_summary.npz -p max
+
+#PCA plot
+plotPCA -in ${path}/bigwig/hMeDIP_bigwig_summary.npz -o hMeDIP_PCAsummary.pdf
+```
+
+
