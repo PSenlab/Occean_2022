@@ -1,0 +1,336 @@
+# Introduction
+**Scripts used to process and analyze GTEx RNA-seq data**
+
+### R packages
+```{r}
+library(openxlsx)
+library(tibble)
+library(ImpulseDE2)
+library(ComplexHeatmap)
+```
+
+# Liver
+```{r}
+#Age phenotype data with sex and cause of death
+GTEx_age <- read.xlsx("/path/GTEx_Analysis_v8_Annotations_SubjectPhenotypesDS.xlsx")
+#Filtering patients with DTHHRDY of 4 (long-term illness- i.e. cancer)
+GTEx_age_sub <- subset(GTEx_age, DTHHRDY == 0 | DTHHRDY == 1 | DTHHRDY == 2 | DTHHRDY == 3)
+
+#SubjID
+#Liver GTEx is the samples from the gene read counts- with two columns - to match to the phenotypic data
+Liver_GTEx <- read.xlsx("/path/Liver/Liver_GTEx_RNAsamp.xlsx")
+
+merged_liver <- merge(Liver_GTEx, GTEx_age_sub, by.x = "SUBJID")
+
+#Subset gene count data
+Liver_GTEx_genes <- read.xlsx("/path/Liver/gene_reads_2017-06-05_v8_liver.gct.xlsx")
+
+row.names(Liver_GTEx_genes) <- NULL
+rownames(Liver_GTEx_genes)=Liver_GTEx_genes$Name
+Liver_GTEx_genes=Liver_GTEx_genes[,-1]
+head(Liver_GTEx_genes)
+
+Liver_GTEx_genes_t <- t(Liver_GTEx_genes)
+
+Liver_GTEx_genes_t <- as.data.frame(Liver_GTEx_genes_t)
+Liver_GTEx_genes_t <- tibble::rownames_to_column(Liver_GTEx_genes_t, "Name")
+
+Liver_GTEx_genes_sub <- subset(Liver_GTEx_genes_t, Name %in% merged_liver$SAMPID)
+
+row.names(Liver_GTEx_genes_sub) <- NULL
+rownames(Liver_GTEx_genes_sub)=Liver_GTEx_genes_sub$Name
+Liver_GTEx_genes_sub=Liver_GTEx_genes_sub[,-1]
+head(Liver_GTEx_genes_sub)
+
+Liver_GTEx_genes_sub_t <- as.data.frame(t(Liver_GTEx_genes_sub))
+Liver_GTEx_genes_sub_t <- tibble::rownames_to_column(Liver_GTEx_genes_sub_t, "Name")
+head(Liver_GTEx_genes_sub_t)
+
+write.xlsx(Liver_GTEx_genes_sub_t, "/path/Liver/gene_reads_2017-06-05_v8_liver_filtered_FASTDEATH.xlsx")
+write.xlsx(merged_liver, "/path/Liver/Liver_GTEx_phenotype_FASTDEATH.xlsx")
+```
+
+# Brain-cortex
+```{bash}
+#SubjID
+#Brain GTEx is the samples from the gene read counts- with two columns - to match to phenotype data
+Brain_GTEx <- read.xlsx("C:/Users/occeanjr/Documents/GTEx_data/Brain_cortex/Brain_GTEx_RNAsamp.xlsx")
+
+merged_Brain <- merge(Brain_GTEx, GTEx_age_sub, by.x = "SUBJID")
+
+#Subset gene count data
+Brain_GTEx_genes <- read.xlsx("/path/Brain_cortex/gene_reads_2017-06-05_v8_brain_cortex.gct.xlsx")
+
+row.names(Brain_GTEx_genes) <- NULL
+rownames(Brain_GTEx_genes)=Brain_GTEx_genes$Name
+Brain_GTEx_genes=Brain_GTEx_genes[,-1]
+head(Brain_GTEx_genes)
+
+Brain_GTEx_genes_t <- t(Brain_GTEx_genes)
+
+Brain_GTEx_genes_t <- as.data.frame(Brain_GTEx_genes_t)
+Brain_GTEx_genes_t <- tibble::rownames_to_column(Brain_GTEx_genes_t, "Name")
+
+Brain_GTEx_genes_sub <- subset(Brain_GTEx_genes_t, Name %in% merged_Brain$SAMPID)
+
+row.names(Brain_GTEx_genes_sub) <- NULL
+rownames(Brain_GTEx_genes_sub)=Brain_GTEx_genes_sub$Name
+Brain_GTEx_genes_sub=Brain_GTEx_genes_sub[,-1]
+head(Brain_GTEx_genes_sub)
+
+Brain_GTEx_genes_sub_t <- as.data.frame(t(Brain_GTEx_genes_sub))
+Brain_GTEx_genes_sub_t <- tibble::rownames_to_column(Brain_GTEx_genes_sub_t, "Name")
+head(Brain_GTEx_genes_sub_t)
+
+write.xlsx(Brain_GTEx_genes_sub_t, "/path/Brain_cortex/gene_reads_2017-06-05_v8_brain_cortex_FASTDEATH.xlsx")
+write.xlsx(merged_Brain, "/path/Brain_cortex/Brain_GTEx_phenotype_FASTDEATH.xlsx")
+```
+
+# Heart leftventricle
+```{r}
+#SubjID
+#Heart_leftventricle GTEx is the samples from the gene read counts- with two columns - to match to phenotypic data
+Heart_leftventricle_GTEx <- read.xlsx("/path/Heart_leftventricle/Heart_leftventricle_GTEx_RNAsamp.xlsx")
+
+merged_Heart_leftventricle <- merge(Heart_leftventricle_GTEx, GTEx_age_sub, by.x = "SUBJID")
+
+#Subset gene count data
+Heart_leftventricle_GTEx_genes <- read.xlsx("/path/Heart_leftventricle/gene_reads_2017-06-05_v8_heart_left_ventricle.xlsx")
+
+row.names(Heart_leftventricle_GTEx_genes) <- NULL
+rownames(Heart_leftventricle_GTEx_genes)=Heart_leftventricle_GTEx_genes$Name
+Heart_leftventricle_GTEx_genes=Heart_leftventricle_GTEx_genes[,-1]
+head(Heart_leftventricle_GTEx_genes)
+
+Heart_leftventricle_GTEx_genes_t <- t(Heart_leftventricle_GTEx_genes)
+
+Heart_leftventricle_GTEx_genes_t <- as.data.frame(Heart_leftventricle_GTEx_genes_t)
+Heart_leftventricle_GTEx_genes_t <- tibble::rownames_to_column(Heart_leftventricle_GTEx_genes_t, "Name")
+
+Heart_leftventricle_GTEx_genes_sub <- subset(Heart_leftventricle_GTEx_genes_t, Name %in% merged_Heart_leftventricle$SAMPID)
+
+row.names(Heart_leftventricle_GTEx_genes_sub) <- NULL
+rownames(Heart_leftventricle_GTEx_genes_sub)=Heart_leftventricle_GTEx_genes_sub$Name
+Heart_leftventricle_GTEx_genes_sub=Heart_leftventricle_GTEx_genes_sub[,-1]
+head(Heart_leftventricle_GTEx_genes_sub)
+
+Heart_leftventricle_GTEx_genes_sub_t <- as.data.frame(t(Heart_leftventricle_GTEx_genes_sub))
+Heart_leftventricle_GTEx_genes_sub_t <- tibble::rownames_to_column(Heart_leftventricle_GTEx_genes_sub_t, "Name")
+head(Heart_leftventricle_GTEx_genes_sub_t)
+
+write.xlsx(Heart_leftventricle_GTEx_genes_sub_t, "/path/Heart_leftventricle/gene_reads_2017-06-05_v8_heart_left_ventricle_filtered.xlsx")
+write.xlsx(merged_Heart_leftventricle, "/path/Heart_leftventricle/Heart_leftventricle_GTEx_phenotype.xlsx")
+```
+
+# Filtering genes to keep only protein coding genes
+```{r}
+ProteinGenesNames <- read.table("/path/hg38_proteincoding_names.txt", header = TRUE)
+
+Liver_subset <- subset(Liver_GTEx_genes_sub_t, Name %in% ProteinGenesNames$Geneid)
+Brain_subset <- subset(Brain_GTEx_genes_sub_t, Name %in% ProteinGenesNames$Geneid)
+Heart_leftventricle_subset <- subset(Heart_leftventricle_GTEx_genes_sub_t, Name %in% ProteinGenesNames$Geneid)
+```
+
+# Identifying genes differential expressed with age using ImpulseDE2
+```{r}
+#----------------------------Liver----------------#
+#Using only protein coding gene biotypes (gencode)
+countData <- read.xlsx("/path/Liver/gene_reads_2017-06-05_v8_Liver_filtered_proteincoding_FASTDEATH.xlsx")
+
+rownames(countData)=countData$Name
+countData=countData[,-1]
+head(countData)
+
+#Filtering
+keep <- rowSums(countData[,1:207]) >= 10
+countData_1 <- countData[keep,]
+
+#ImpulseDE2 requires sample name be written and countData to be a matrix
+#all numeric and matrix
+mutate_if(countData_1, is.factor, ~ as.numeric(levels(.x))[.x])
+countData_1 <- as.matrix(countData_1)
+countData_1
+
+#Column data - sex is relabeled as batch
+colData_2 <- read.xlsx("/path/Liver/Liver_GTEx_phenotype_FASTDEATH_sex.xlsx")
+#Time should be numeric
+colData_2$Time <- as.numeric(colData_2$Time)
+colData_2
+
+#Sex is relabeled as Batch here
+#Running ImpulseDe2
+objectImpulseDE2 <- runImpulseDE2(
+  matCountData    = countData_1, 
+  dfAnnotation    = colData_2,
+  boolCaseCtrl    = FALSE,
+  boolIdentifyTransients = TRUE,
+  vecConfounders  = c("Batch"),
+  scaQThres       = 0.05,
+  scaNProc        = 20)
+
+#Creating heatmap of transient (denoted by *) and monotonous genes
+lsHeatmaps <- plotHeatmap(
+  objectImpulseDE2       = objectImpulseDE2,
+  strCondition           = "case",
+  boolIdentifyTransients = TRUE,
+  scaQThres              = 0.05)
+
+pdf("/path/Liver/output_FASTDEATH/GTEX_rawheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps$complexHeatmapRaw)
+dev.off()
+
+pdf("/path/Liver/output_FASTDEATH/GTEX_complexheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps$complexHeatmapFit)
+dev.off()
+
+#dataframe with results
+imp_data <- objectImpulseDE2$dfImpulseDE2Results
+
+#transient genes
+t_up <- as.data.frame(lsHeatmaps$lsvecGeneGroups$transient_up)
+t_down <- as.data.frame(lsHeatmaps$lsvecGeneGroups$transient_down)
+
+#monotonous genes (transition)
+m_up <- as.data.frame(lsHeatmaps$lsvecGeneGroups$transition_up)
+m_down <- as.data.frame(lsHeatmaps$lsvecGeneGroups$transition_down)
+
+write.xlsx(imp_data, "/path/Liver/output_FASTDEATH/ImpulseDE2_results.xlsx")
+
+write.xlsx(t_up, "/path/Liver/output_FASTDEATH/transient_up.xlsx")
+write.xlsx(t_down, "/path/Liver/output_FASTDEATH/transient_down.xlsx")
+write.xlsx(m_up, "/path/Liver/output_FASTDEATH/monotonous_up.xlsx")
+write.xlsx(m_down, "/path/Liver/output_FASTDEATH/monotonous_down.xlsx")
+
+
+#-----------------------------Brain----------------#
+#Using only protein coding gene biotypes (gencode)
+CountData_BR <- read.xlsx("/path/Brain/gene_reads_2017-06-05_v8_Brain_filtered_proteincoding_FASTDEATH.xlsx")
+
+rownames(CountData_BR)=CountData_BR$Name
+CountData_BR=CountData_BR[,-1]
+head(CountData_BR)
+
+keep <- rowSums(CountData_BR[,1:193]) >= 10
+CountData_BR_1 <- CountData_BR[keep,]
+
+#ImpulseDE2 requires sample name be written and CountData_BR to be a matrix
+#all numeric and matrix
+mutate_if(CountData_BR_1, is.factor, ~ as.numeric(levels(.x))[.x])
+CountData_BR_1 <- as.matrix(CountData_BR_1)
+CountData_BR_1
+
+colData_BR_2 <- read.xlsx("/path/Brain/Brain_GTEx_phenotype_FASTDEATH_sex.xlsx")
+#Time should be numeric
+colData_BR_2$Time <- as.numeric(colData_BR_2$Time)
+colData_BR_2
+
+#Sex is relabeled as Batch here
+#Running ImpulseDe2
+objectImpulseDE2_BR <- runImpulseDE2(
+  matCountData    = CountData_BR_1, 
+  dfAnnotation    = colData_BR_2,
+  boolCaseCtrl    = FALSE,
+  boolIdentifyTransients = TRUE,
+  vecConfounders  = c("Batch"),
+  scaQThres       = 0.05,
+  scaNProc        = 20)
+
+#Creating heatmap of transient (denoted by *) and monotonous genes
+lsHeatmaps_BR <- plotHeatmap(
+  objectImpulseDE2       = objectImpulseDE2_BR,
+  strCondition           = "case",
+  boolIdentifyTransients = TRUE,
+  scaQThres              = 0.05)
+
+pdf("/path/Brain/output_FASTDEATH/GTEX_rawheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps_BR$complexHeatmapRaw)
+dev.off()
+
+pdf("/path/Brain/output_FASTDEATH/GTEX_complexheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps_BR$complexHeatmapFit)
+dev.off()
+
+#dataframe with results
+imp_data_BR <- objectImpulseDE2_BR$dfImpulseDE2Results
+
+#transient genes
+t_up_BR <- as.data.frame(lsHeatmaps_BR$lsvecGeneGroups$transient_up)
+t_down_BR <- as.data.frame(lsHeatmaps_BR$lsvecGeneGroups$transient_down)
+
+#monotonous genes (transition)
+m_up_BR <- as.data.frame(lsHeatmaps_BR$lsvecGeneGroups$transition_up)
+m_down_BR <- as.data.frame(lsHeatmaps_BR$lsvecGeneGroups$transition_down)
+
+write.xlsx(imp_data_BR, "/path/Brain/output_FASTDEATH/ImpulseDE2_results_BR.xlsx")
+
+write.xlsx(t_up_BR, "/path/Brain/output_FASTDEATH/transient_up_BR.xlsx")
+write.xlsx(t_down_BR, "/path/Brain/output_FASTDEATH/transient_down_BR.xlsx")
+write.xlsx(m_up_BR, "/path/Brain/output_FASTDEATH/monotonous_up_BR.xlsx")
+write.xlsx(m_down_BR, "/path/Brain/output_FASTDEATH/monotonous_down_BR.xlsx")
+
+#-----------------------------Heart left ventricle----------------#
+CountData_HRLV <- read.xlsx("/path/Heart_leftventricle/gene_reads_2017-06-05_v8_heart_left_ventricle_filtered_proteincoding_FASTDEATH.xlsx")
+
+rownames(CountData_HRLV)=CountData_HRLV$Name
+CountData_HRLV=CountData_HRLV[,-1]
+head(CountData_HRLV)
+
+#Filtering
+keep <- rowSums(CountData_HRLV[,1:393]) >= 10
+CountData_HRLV_1 <- CountData_HRLV[keep,]
+
+#ImpulseDE2 requires sample name be written and CountData_HRLV to be a matrix
+#all numeric and matrix
+mutate_if(CountData_HRLV_1, is.factor, ~ as.numeric(levels(.x))[.x])
+CountData_HRLV_1 <- as.matrix(CountData_HRLV_1)
+CountData_HRLV_1
+
+ColData_HRLV_2 <- read.xlsx("/path/Heart_leftventricle/Heart_leftventricle_GTEx_phenotype_sex.xlsx")
+#Time should be numeric
+ColData_HRLV_2$Time <- as.numeric(ColData_HRLV_2$Time)
+ColData_HRLV_2
+
+#Sex is relabeled as Batch here
+#Running ImpulseDe2
+objectImpulseDE2_HRLV <- runImpulseDE2(
+  matCountData    = CountData_HRLV_1, 
+  dfAnnotation    = ColData_HRLV_2,
+  boolCaseCtrl    = FALSE,
+  boolIdentifyTransients = TRUE,
+  vecConfounders  = c("Batch"),
+  scaQThres       = 0.05,
+  scaNProc        = 20)
+
+#Creating heatmap of transient (denoted by *) and monotonous genes
+lsHeatmaps_HRLV <- plotHeatmap(
+  objectImpulseDE2       = objectImpulseDE2_HRLV,
+  strCondition           = "case",
+  boolIdentifyTransients = TRUE,
+  scaQThres              = 0.05)
+
+pdf("/path/Heart_leftventricle/output_FASTDEATH/GTEX_rawheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps_HRLV$complexHeatmapRaw)
+dev.off()
+
+pdf("/path/Heart_leftventricle/output_FASTDEATH/GTEX_complexheatmap.pdf",width=15, height=14, useDingbats=FALSE)
+draw(lsHeatmaps_HRLV$complexHeatmapFit)
+dev.off()
+
+#dataframe with results
+imp_data_HRLV <- objectImpulseDE2_HRLV$dfImpulseDE2Results
+
+#transient genes
+t_up_HRLV <- as.data.frame(lsHeatmaps_HRLV$lsvecGeneGroups$transient_up)
+t_down_HRLV <- as.data.frame(lsHeatmaps_HRLV$lsvecGeneGroups$transient_down)
+
+#monotonous genes (transition)
+m_up_HRLV <- as.data.frame(lsHeatmaps_HRLV$lsvecGeneGroups$transition_up)
+m_down_HRLV <- as.data.frame(lsHeatmaps_HRLV$lsvecGeneGroups$transition_down)
+
+write.xlsx(imp_data_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/ImpulseDE2_results_HRLV.xlsx")
+
+write.xlsx(t_up_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/transient_up_HRLV.xlsx")
+write.xlsx(t_down_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/transient_down_HRLV.xlsx")
+write.xlsx(m_up_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/monotonous_up_HRLV.xlsx")
+write.xlsx(m_down_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/monotonous_down_HRLV.xlsx")
+```
