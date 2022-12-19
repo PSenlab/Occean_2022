@@ -33,7 +33,7 @@ library(openxlsx)
 path="/path"
 
 #text file with the names of all the samples
-#hMeDIP_Names.txt
+#Sample_names.txt
 ```
 
 ## Adapter trimming
