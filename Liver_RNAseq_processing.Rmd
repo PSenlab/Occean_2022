@@ -1,0 +1,192 @@
+***
+# Introduction
+**Scripts used to process and analyze Liver RNA-seq data from Yang et al**
+
+## Packages
+### Linux packages
+```{bash}
+fastqc/0.11.9
+java/12.0.1
+trimmomatic/0.39
+STAR/2.7.5b
+picard/2.20.8
+samtools/1.10
+deeptools/3.5.0
+```
+
+### R packages
+```{r}
+library(Rsubread) #/2.6.4
+library(gtools) #/3.9.2
+library(DESeq2) #/1.30.1
+```
+
+# Data Pre-processing
+```{bash}
+##== linux command ==##
+path="/path"
+#text file with the names of all the RNA-seq samples
+#RNAseq_names.txt
+```
+
+# Adapter trimming
+```{bash}
+mkdir -p ${path}/fastq/adapt_trim
+
+for sample_names in $(cat RNAseq_names.txt)
+do
+#run1
+  java -jar $TRIMMOJAR PE -threads 24 -phred33 ${path}/fastq/run1/${sample_names}_R1_001.fastq.gz \
+  ${path}/fastq/run1/${sample_names}_R2_001.fastq.gz ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R1_paired.fq.gz \
+  ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R1_unpaired.fq.gz ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R2_paired.fq.gz \
+  ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R2_unpaired.fq.gz \
+  ILLUMINACLIP:${path}/TruSeq_and_nextera_adapters.fa:3:50:10 LEADING:10 TRAILING:10 SLIDINGWINDOW:4:20 MAXINFO:50:0.8 MINLEN:25
+#run2
+  java -jar $TRIMMOJAR PE -threads 24 -phred33 ${path}/fastq/run2/${sample_names}_R1_001.fastq.gz \
+  ${path}/fastq/run2/${sample_names}_R2_001.fastq.gz ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R1_paired.fq.gz \
+  ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R1_unpaired.fq.gz ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R2_paired.fq.gz \
+  ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R2_unpaired.fq.gz \
+  ILLUMINACLIP:${path}/TruSeq_and_nextera_adapters.fa:3:50:10 LEADING:10 TRAILING:10 SLIDINGWINDOW:4:20 MAXINFO:50:0.8 MINLEN:25
+#remove unpaired fastqs
+  rm ${path}/fastq/adapt_trim/*_unpaired.fq.gz
+done
+```
+
+# Alignment using STAR
+```{bash}
+#calculate indexes using genomeGenerate (mm10)
+#using genome fasta obtained from Gencode (GRCm38.p6)
+mkdir ${path}/STAR_genome_mm10_ercc
+chmod 777 ${path}/STAR_genome_mm10_ercc
+mkdir ${path}/STAR_genome_mm10_ercc/star_genome  
+chmod 777 ${path}/STAR_genome_mm10_ercc/star_genome
+STAR --runMode genomeGenerate --genomeDir ${path}/STAR_genome_mm10_ercc/star_genome \
+--genomeFastaFiles ${path}/mm10_ERCC_ref/GRCm38.primary_assembly.genome.fa --runThreadN 24
+
+mkdir ${path}/bam
+mkdir ${path}/bam/logs
+chmod -R 777 ${path}/bam/logs
+
+#Run1
+for sample_names in $(cat RNAseq_names.txt)
+do
+   STAR --genomeDir ${path}/STAR_genome_mm10_ercc/star_genome \
+   --readFilesIn ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R1_paired.fq.gz \
+   ${path}/fastq/adapt_trim/${sample_names}_trimmed_run1_R2_paired.fq.gz \
+   --readFilesCommand zcat --outTmpDir ${path}/bam/logs/${sample_names}_STAR --outSAMunmapped Within \
+   --outFilterType BySJout --outFilterMultimapNmax 20 --outFilterMismatchNmax 999 \
+   --outFilterMismatchNoverLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 \
+   --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --sjdbScore 1 --runThreadN 24\
+   --outSAMtype BAM SortedByCoordinate \
+   --quantMode TranscriptomeSAM --sjdbGTFfile ${path}/mm10_ERCC_ref/gencode_vM23_noM_annotation.gtf --sjdbGTFfeatureExon exon \
+   --outFileNamePrefix ${path}/bam/${sample_names}_run1_
+done
+
+#Run2
+for sample_names in $(cat RNAseq_names.txt)
+do
+   STAR --genomeDir ${path}/STAR_genome_mm10_ercc/star_genome \
+   --readFilesIn ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R1_paired.fq.gz \
+   ${path}/fastq/adapt_trim/${sample_names}_trimmed_run2_R2_paired.fq.gz \
+   --readFilesCommand zcat --outTmpDir ${path}/bam/logs/${sample_names}_STAR --outSAMunmapped Within \
+   --outFilterType BySJout --outFilterMultimapNmax 20 --outFilterMismatchNmax 999 \
+   --outFilterMismatchNoverLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 \
+   --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --sjdbScore 1 --runThreadN 24\
+   --outSAMtype BAM SortedByCoordinate \
+   --quantMode TranscriptomeSAM --sjdbGTFfile ${path}/mm10_ERCC_ref/gencode_vM23_noM_annotation.gtf --sjdbGTFfeatureExon exon \
+   --outFileNamePrefix ${path}/bam/${sample_names}_run2_
+done
+```
+
+# Removing duplicates using Picard
+#Obtained refFlat file from https://hgdownload.soe.ucsc.edu/goldenPath/mm10/database/refFlat.txt.gz
+```{bash}
+mkdir ${path}/bam/metric
+
+for sample_names in $(cat RNAseq_names.txt)
+do
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  CollectRnaSeqMetrics \
+   REF_FLAT=${path}/mm10_refFlat.txt \
+   INPUT=${path}/bam/${sample_names}_run1_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${path}/bam/metric/${sample_names}_run1_RnaSeqMetrics.txt \
+   STRAND=NONE
+   
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  CollectRnaSeqMetrics \
+   REF_FLAT=${path}/mm10_refFlat.txt \
+   INPUT=${path}/bam/${sample_names}_run2_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${path}/bam/metric/${sample_names}_run2_RnaSeqMetrics.txt \
+   STRAND=NONE 
+
+#remove duplicates
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  MarkDuplicates \
+   INPUT=${path}/bam/${sample_names}_run1_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${path}/bam/${sample_names}_run1_Aligned.out.MKDUP.bam \
+   METRICS_FILE=${path}/bam/metric/${sample_names}_run1_RnaSeqMetrics.txt ASSUME_SORTED=true \
+   MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=1000    REMOVE_DUPLICATES=true \
+   REMOVE_SEQUENCING_DUPLICATES=true
+   
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  MarkDuplicates \
+   INPUT=${path}/bam/${sample_names}_run2_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${path}/bam/${sample_names}_run2_Aligned.out.MKDUP.bam  \
+   METRICS_FILE=${path}/bam/metric/${sample_names}_run2_RnaSeqMetrics.txt ASSUME_SORTED=true \
+   MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=1000    REMOVE_DUPLICATES=true \
+   REMOVE_SEQUENCING_DUPLICATES=true 
+done
+```
+
+```{bash}
+# Filter bam files
+for sample_names in $(cat RNAseq_names.txt)
+do
+#run1
+  samtools view -@ 12 -b -f 2 -q 10 ${path}/bam/${sample_names}_run1_Aligned.out.MKDUP.bam | \
+  samtools view -@ 12 -b  >| ${path}/bam/${sample_names}_run1_filtered.bam
+  
+#run2
+  samtools view -@ 12 -b -f 2 -q 10 ${path}/bam/${sample_names}_run2_Aligned.out.MKDUP.bam | \
+  samtools view -@ 12 -b  >| ${path}/bam/${sample_names}_run2_filtered.bam
+done
+
+
+#Index bam files
+for sample_names in $(cat RNAseq_names.txt)
+do
+#run1
+  samtools index ${path}/bam/${sample_names}_run1_filtered.bam ${path}/bam/${sample_names}_run1_filtered_index.bam.bai
+#run2
+  samtools index ${path}/bam/${sample_names}_run2_filtered.bam ${path}/bam/${sample_names}_run2_filtered_index.bam.bai
+done
+
+#merge bam
+mkdir -p ${path}/merged_bam
+
+#Merge run 1 and run2 of RNA-seq using samtools
+for sample_names in $(cat RNAseq_names.txt)
+do
+samtools merge ${path}/merged_bam/${sample_names}_merged.bam ${path}/bam/${sample_names}_run?_filtered.bam
+done
+```
+
+# Generating bigwig files
+```{bash}
+#Index bam files
+INPUT=${path}/bam/*_filtered.bam
+
+for i in $INPUT
+do
+samtools index $i
+done
+
+#Generating bigwig files
+mkdir -p ${path}/bigwig
+
+for sample_names in $(cat $RNAseq_names.txt)
+do
+  bamCoverage -b ${path}/bam/${sample_names}_filtered.bam  -o ${path}/bigwig/${sample_names}_filtered.bw -of bigwig \
+  --effectiveGenomeSize 1870000000 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
+done
+```
+
+# Obtaining gene counts
+
+
