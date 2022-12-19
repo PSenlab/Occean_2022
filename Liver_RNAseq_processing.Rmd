@@ -19,6 +19,8 @@ deeptools/3.5.0
 library(Rsubread) #/2.6.4
 library(gtools) #/3.9.2
 library(DESeq2) #/1.30.1
+library(tibble) #/3.1.7
+library(dplyr) #/1.0.9
 ```
 
 # Data Pre-processing
@@ -188,5 +190,123 @@ done
 ```
 
 # Obtaining gene counts
+```{r}
+RNAseq_bam <-list.files("/path/bam", pattern="*_filtered.bam$", full.name=T)
+RNAseq_bam <- mixedsort(RNAseq_bam)
 
+#Using mm10 gencode comprehensive GTF (release M23, GRCm38.p6)
+features <- featureCounts(files=RNAseq_bam,
+        annot.ext="/path/gencode_vM23_noM_annotation.gtf",
+        isGTFAnnotationFile = TRUE,
+        GTF.featureType = "exon",
+        GTF.attrType = "gene_name",
+        GTF.attrType.extra = "gene_type",
+        nthreads=12,
+        isPairedEnd = T,checkFragLength = T,requireBothEndsMapped = T)
 
+counts <- features$counts
+
+sample_filename <- colnames(counts)
+sample_name <- gsub("_filtered.bam","",sample_filename)
+sample_name <- gsub("\\.","_",sample_name)
+          
+colnames(counts) <- sample_name
+#Filtered for Liver RNA-seq before timepoint (but not 240h to have all genes matching before timepoint)
+counts <- counts[rowSums(counts) > 1, ]
+
+counts_DF <- as.data.frame(counts)
+counts_DF <- tibble::rownames_to_column(counts_DF, "GeneID")
+
+#only protein-coding genes
+gene_type <- features$annotation[,c("GeneID", "gene_type")]
+gene_type_proC <- gene_type[grepl("protein_coding", gene_type$gene_type),]   
+counts_proC <- counts_DF %>% semi_join(gene_type_proC, by = "GeneID") # keep rows with matching ID
+
+write.xlsx(counts_proC, "/path/RNAseq_gene_counttable.xlsx")
+```
+
+# Differential gene expression
+```{r}
+#Moving genes names to row
+row.names(counts_proC) <- NULL
+rownames(counts_proC)=counts_proC$GeneID
+counts_proC=counts_proC[,-1]
+head(counts_proC)
+
+group <- c("old","old","old","old","young","young","young","young")
+#Column 
+Col <- as.data.frame(cbind(colnames(RNAseq),group))
+
+#DESeq design
+Col$group <- as.factor(Col$group)
+Col$group <- relevel(Col$group, ref = "young")
+dds <- DESeqDataSetFromMatrix(countData = RNAseq,
+                              colData = Col,
+                              design = ~group)
+dds <- DESeq(dds)
+resultsNames(dds)
+
+#Differential analysis results
+res_DF <- as.data.frame(res)
+res_DF <- tibble::rownames_to_column(res_DF, "geneID")
+write.xlsx(res_DF, "/path/DESeq2_DiffAnalysis.xlsx")
+```
+
+# within sample gene expression ranking for young and old
+```{r}
+#DESeq2 normalized counts
+normalized_counts <- counts(dds, normalized=TRUE)
+normalized_counts <- as.data.frame(normalized_counts)
+
+#average young and old norm counts 
+normalized_counts$Young_avg <- rowMeans(normalized_counts[ , c(5:8)], na.rm=TRUE)
+normalized_counts$Old_avg <- rowMeans(normalized_counts[ , c(1:4)], na.rm=TRUE)
+
+#Ranking genes for young and old by average
+normalized_counts <- tibble::rownames_to_column(normalized_counts, "geneID")
+
+#Young
+RNAseq_quantiles <- normalized_counts %>%
+  mutate(Y_quantile = ntile(Young_avg, 3))
+
+#Old
+RNAseq_quantiles <- RNAseq_quantiles %>%
+  mutate(O_quantile = ntile(Old_avg, 3))
+  
+Young_low <- subset(RNAseq_quantiles, Y_quantile == "1")
+Young_intermediate <- subset(RNAseq_quantiles, Y_quantile == "2")
+Young_high <- subset(RNAseq_quantiles, Y_quantile == "3")
+
+Old_low <- subset(RNAseq_quantiles, O_quantile == "1")
+Old_intermediate <- subset(RNAseq_quantiles, O_quantile == "2")
+Old_high <- subset(RNAseq_quantiles, O_quantile == "3")
+```
+
+# Ranking/categorizing DESeq2 results by fold change
+```{r}
+RNAseq_LFC <- res_DF %>%
+  mutate(LFC_quantile = ntile(log2FoldChange, 3))
+
+#subset
+RNA_LFC_1 <- subset(RNAseq_LFC, LFC_quantile == "1")
+RNA_LFC_3 <- subset(RNAseq_LFC, LFC_quantile == "3")
+
+write.table(RNA_LFC_1$geneID, "/path/RNA_LFC_1.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+write.table(RNA_LFC_2$geneID, "/path/RNA_LFC_2.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+write.table(RNA_LFC_3$geneID, "/path/RNA_LFC_3.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+```
+
+# Ranking/categorizing DESeq2 results by absolute fold change
+```{r}
+res_DF$foldchange_abs <- abs(res_DF$log2FoldChange)
+
+RNAseq_absLFC <- res_DF %>%
+  mutate(LFC_quantile_abs = ntile(foldchange_abs, 3))
+  
+#subset
+RNA_absLFC_1 <- subset(RNAseq_absLFC, LFC_quantile_abs == "1")
+RNA_absLFC_3 <- subset(RNAseq_absLFC, LFC_quantile_abs == "3")
+
+write.table(RNA_absLFC_1$geneID, "/path/RNA_absLFC_1.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+write.table(RNA_absLFC_3$geneID, "/path/RNA_absLFC_3.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+```
