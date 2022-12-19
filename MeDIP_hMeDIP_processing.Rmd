@@ -450,5 +450,5 @@ DBdata.db_sites_all <- dba.report(DBdata_analyze, th=1)
 DBdata.db_sites_all
 
 All_peaks <- as.data.frame(DBdata.db_sites_all)
-write.csv(All_peaks, file="/data/occeanjr/hMeDIP/unique_alignment/DiffBind_analysis/hMeDIP_All_peaks_110_unique.csv", row.names=T)
+write.csv(All_peaks, file="/path/hMeDIP_All_peaks_110_unique.csv", row.names=T)
 ```
