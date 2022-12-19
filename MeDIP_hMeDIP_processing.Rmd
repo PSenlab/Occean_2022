@@ -13,6 +13,7 @@ samtools/1.9
 picard/2.23.7
 bedtools/2.30.0
 deeptools/3.5.0
+macs/2.2.7.1
 ```
 
 ```{r}
@@ -22,6 +23,8 @@ library(viridisLite)
 library(viridis)
 library(ggpubr)
 library(corrplot)
+library(DiffBind)
+library(openxlsx)
 ```
 
 # Data Pre-processing
@@ -340,26 +343,116 @@ do
 done
 ```
 
-## Generate bigWig files
+# Generating bigwig files
 ```{bash}
 mkdir -p ${path}/bigwig
 
-for Sample_names in $(cat Sample_names.txt)
+for hMeDIP_names in $(cat hMeDIP_names.txt)
 do
-  bamCoverage -b ${path}/bam/${Sample_names}_noDUP_B.bam -o ${path}/bigwig/${Sample_names}.bw -of bigwig \
+  bamCoverage -b ${path}/bam/${hMeDIP_names}_unique_noDUP_B.bam -o ${path}/bigwig/${hMeDIP_names}_unique.bw -of bigwig \
   --effectiveGenomeSize 1870000000 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
 done
 ```
 
-# Assess replicate reproducibility 
+
+# Performing input subtraction from bigwig files
 ```{bash}
-INPUT1=${path}/bigwig/*.bw
+mkdir -p ${path}/bigwig/InputSub
+OUTPUT1="${path}/bigwig/InputSub/"
 
-#Creating npz file
-multiBigwigSummary bins -b $INPUT1 -o ${path}/bigwig/hMeDIP_bigwig_summary.npz -p max
+YOUNG_5hmC=(${path}/bigwig/Y?_5hmC*)
+YOUNG_INPUT=(${path}/bigwig/Y?_input*)
+OLD_5hmC=(${path}/bigwig/O?_5hmC*)
+OLD_INPUT=(${path}/bigwig/O?_input*)
 
-#PCA plot
-plotPCA -in ${path}/bigwig/hMeDIP_bigwig_summary.npz -o hMeDIP_PCAsummary.pdf
+#Young 5hmC and Input
+for i in $(seq 0 $((${#YOUNG_5hmC[@]}-1)))
+do
+base=$(basename ${YOUNG_5hmC[$i]})
+sample_name=${base%%.*}
+base1=$(basename ${YOUNG_INPUT[$i]})
+sample_name1=${base1%%.*}
+bigwigCompare -b1 ${YOUNG_5hmC[$i]} -b2 ${YOUNG_INPUT[$i]} --operation subtract -o ${OUTPUT1}${sample_name}_sub_${sample_name1}.bw
+done
+
+#Old 5hmC and Input
+for i in $(seq 0 $((${#OLD_5hmC[@]}-1)))
+do
+base=$(basename ${OLD_5hmC[$i]})
+sample_name=${base%%.*}
+base1=$(basename ${OLD_INPUT[$i]})
+sample_name1=${base1%%.*}
+bigwigCompare -b1 ${OLD_5hmC[$i]} -b2 ${OLD_INPUT[$i]} --operation subtract -o ${OUTPUT1}${sample_name}_sub_${sample_name1}.bw
+done
 ```
 
+# broad and narrow peak calling using MACS2
+```{bash}
+mkdir -p ${path}/Macs2_peaks_001
+OUTPUT1="${path}/Macs2_peaks_001/"
 
+Y_O_5hmC=(${path}/bam/*??_5hmC_unique_noDUP_B.bam)
+Y_O_INPUT=(${path}/bam/*??_input_unique_noDUP_B.bam)
+
+#5hmC and Input
+for i in $(seq 0 $((${#Y_O_5hmC[@]}-1)))
+do
+base=$(basename ${Y_O_5hmC[$i]})
+sample_name=${base%%.*}
+base1=$(basename ${Y_O_INPUT[$i]})
+sample_name1=${base1%%.*}
+macs2 callpeak -t ${Y_O_5hmC[$i]} -c ${Y_O_INPUT[$i]} -n ${sample_name}_${sample_name1} --outdir $OUTPUT1 -f BAMPE -g 1.87e9 -B --broad -q 0.001 --broad-cutoff 0.001
+done
+```
+
+# DiffBind analysis (performed according to vignette by Rory Stark and Gord Brown)
+```{r}
+# Reading in the peaksets obtained from Macs2
+samples <- read.csv("/path/hMeDIP_DiffBind_SampleSheet_unique.csv")
+
+#Create a DBA object by reading the peaksets with the dba DiffBind function
+DBdata <- dba(sampleSheet=samples)
+DBdata
+
+#Correlation heatmap of the MACS2 peaks initial clustering of the samples using the cross-correlations of each row of the binding matrix
+peak_heat <- plot(DBdata)
+peak_heat
+
+# Counting reads
+DBdata_count <- dba.count(DBdata, bParallel=FALSE, summits=110)
+
+#Correlation heatmap, using affinity (read count) data instead of peak score
+hMeDIP_ReadCount_heatmapCor <- plot(DBdata_count)
+hMeDIP_ReadCount_heatmapCor
+
+#Number of reads that overlap a consensus peak
+info <- dba.show(DBdata_count)
+libsizes <- cbind(LibReads=info$Reads, FRiP=info$FRiP, PeakReads=round(info$Reads * info$FRiP))
+rownames(libsizes) <- info$ID
+
+#Normalizing the data
+DBdata_norm <- dba.normalize(DBdata_count, method=DBA_DESEQ2)
+
+#Establishing a model design and contrast
+#"Young" is the reference group
+DBdata_cont <- dba.contrast(DBdata_norm, minMembers = 4,
+                       reorderMeta=list(Condition="Young"))
+
+#Performing differential analysis
+DBdata_analyze <- dba.analyze(DBdata_cont)
+dba.show(DBdata_analyze, bContrasts=TRUE)
+
+#Saving and retrieving the differentially bound sites
+DBdata.db_sites <- dba.report(DBdata_analyze)
+
+#Save peak files- BED file can be used for peak annotation
+Diff_peaks <- as.data.frame(DBdata.db_sites)
+write.csv(Diff_peaks, file="/path/hMeDIP_peaks_110_unique.csv", row.names=T)
+
+#Saving and retrieving all the sites
+DBdata.db_sites_all <- dba.report(DBdata_analyze, th=1)
+DBdata.db_sites_all
+
+All_peaks <- as.data.frame(DBdata.db_sites_all)
+write.csv(All_peaks, file="/data/occeanjr/hMeDIP/unique_alignment/DiffBind_analysis/hMeDIP_All_peaks_110_unique.csv", row.names=T)
+```
