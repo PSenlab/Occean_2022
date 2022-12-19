@@ -7,6 +7,9 @@ library(openxlsx)
 library(tibble)
 library(ImpulseDE2)
 library(ComplexHeatmap)
+library(DESeq2) #/1.30.1
+library(plotrix)
+library(reshape)
 ```
 
 # Liver
@@ -334,3 +337,343 @@ write.xlsx(t_down_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/transient_do
 write.xlsx(m_up_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/monotonous_up_HRLV.xlsx")
 write.xlsx(m_down_HRLV, "/path/Heart_leftventricle/output_FASTDEATH/monotonous_down_HRLV.xlsx")
 ```
+
+# Plots of normalized gene expression across different age groups
+# Liver
+```{r}
+Liver_GTEx <- read.xlsx("/path/Liver/gene_reads_2017-06-05_v8_Liver_filtered_proteincoding_FASTDEATH.xlsx")
+Liver_phenotype <- read.xlsx("/path/Liver/Liver_GTEx_phenotype_FASTDEATH.xlsx")
+
+#Moving genes names to row
+row.names(Liver_GTEx) <- NULL
+rownames(Liver_GTEx)=Liver_GTEx$Name
+Liver_GTEx=Liver_GTEx[,-1]
+head(Liver_GTEx)
+
+#DEseq2 analysis for normalization
+Liver_dds <- DESeqDataSetFromMatrix(countData = Liver_GTEx,
+                              colData = Liver_phenotype,
+                              design = ~AGE)
+                              
+Liver_dds <- DESeq(Liver_dds)
+
+#Obtaining normalized counts
+Liver_norm <- counts(Liver_dds, normalized = TRUE)
+Liver_norm <- as.data.frame(Liver_norm)
+Liver_norm_t <- as.data.frame(t(Liver_norm))
+Liver_norm_t <- tibble::rownames_to_column(Liver_norm_t, "SAMPID")
+head(Liver_norm_t)
+
+#merge
+Liver_merge <- merge(Liver_norm_t, Liver_phenotype, by.x = "SAMPID")
+
+#Agregrate for mean across replicates
+Liver_mean <- aggregate(Liver_merge[, 2:19279], list(Liver_merge$AGE), mean)
+
+row.names(Liver_mean) <- NULL
+rownames(Liver_mean)=Liver_mean$Group.1
+Liver_mean=Liver_mean[,-1]
+Liver_mean_t <- as.data.frame(t(Liver_mean))
+Liver_mean_t <- tibble::rownames_to_column(Liver_mean_t, "Name")
+head(Liver_mean_t)
+
+#Differentially expressed genes from ImpulseDE2
+#Liver-specific genes from HPA atlas
+Liver_Impulse <- read.xlsx("/path/Liver/GTEx_ImpulseDE2_diff.xlsx")
+Liver_spec <- read.xlsx("/path/Tissuespecificgenes_enriched_enhanced.xlsx")
+
+#Subset IMPULSEDE2 diff genes
+Liver_Impulse_sub <- subset(Liver_mean_t, Name %in% Liver_Impulse$Liver_diff)
+
+#Subset tissue-specific genes- must first seperate ensembl ID from GTEx
+Liver_mean_sep <- Liver_mean_t %>% 
+     separate(Name, into = c("Name", "Second"), "[.]")
+
+Liver_mean_sep <- subset(Liver_mean_sep, select = -c(Second))
+Liver_spec_sub <- subset(Liver_mean_sep, Name %in% Liver_spec$Ensembl)
+
+#Add grouping
+Liver_Impulse_sub$Group <- "Liver_Differential"
+Liver_spec_sub$Group <-  "Liver_specific"
+Liver_merged_sub <- rbind(Liver_Impulse_sub, Liver_spec_sub)
+Liver_melt_df <- melt(Liver_merged_sub, id=c("Name", "Group"))
+
+#Data summary function for mean and standard error of mean
+# Function to calculate the mean and standard error
+  # for each group
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      std = std.error(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+Liver_Dsummary <- data_summary(Liver_melt_df, varname="value", 
+                    groupnames=c("Group","variable"))
+
+Liver_Dsummary$Group <- factor(Liver_Dsummary$Group, levels=c('Liver_specific', 'Liver_Differential'))
+
+#Standard error of mean
+p_liver <- ggplot(Liver_Dsummary, aes(x=variable, y=value, group=Group, color=Group)) + 
+  geom_line() +
+  geom_point()+
+  expand_limits(y=0) +
+  geom_errorbar(aes(ymin=value-std, ymax=value+std), width=.2,
+                 position=position_dodge(0.05)) +
+  theme_classic() +
+  labs(x= "Age", y = "Normalized count (DESeq2 median-of-ratios")
+
+p_liver + facet_grid(Group ~ ., scales = "free_y")
+
+#Statistical testing
+-------------------**Liver-differential genes**----------------
+Liver_diffonly <- subset(Liver_melt_df, Group == "Liver_Differential")
+#Anova
+Liver_anova1 <- aov(value ~ variable, Liver_diffonly)
+# Test summary
+summary(Liver_anova1)
+#Pairwise comparisons
+TukeyHSD(Liver_anova1)
+
+-------------------**Liver-specific genes**----------------
+Liver_speconly <- subset(Liver_melt_df, Group == "Liver_specific")
+#Anova
+Liver_anova2 <- aov(value ~ variable, Liver_speconly)
+# Test summary
+summary(Liver_anova2)
+#Pairwise comparisons
+TukeyHSD(Liver_anova2)
+```
+
+# Plots of normalized gene expression across different age groups
+# Heart
+```{r}
+Heart_GTEx <- read.xlsx("/path/Heart/gene_reads_2017-06-05_v8_heart_left_ventricle_filtered_proteincoding_FASTDEATH.xlsx")
+Heart_phenotype <- read.xlsx("/Users/jamesoccean/Desktop/Home_analyses/GTEx/Heart_leftventricle_GTEx_phenotype.xlsx")
+
+#Moving genes names to row
+row.names(Heart_GTEx) <- NULL
+rownames(Heart_GTEx)=Heart_GTEx$Name
+Heart_GTEx=Heart_GTEx[,-1]
+head(Heart_GTEx)
+
+#DEseq2 analysis for normalization
+Heart_dds <- DESeqDataSetFromMatrix(countData = Heart_GTEx,
+                              colData = Heart_phenotype,
+                              design = ~AGE)
+
+Heart_dds <- DESeq(Heart_dds)
+
+#Obtaining normalized counts
+Heart_norm <- counts(Heart_dds, normalized = TRUE)
+Heart_norm <- as.data.frame(Heart_norm)
+
+Heart_norm_t <- as.data.frame(t(Heart_norm))
+Heart_norm_t <- tibble::rownames_to_column(Heart_norm_t, "SAMPID")
+
+#merge
+Heart_merge <- merge(Heart_norm_t, Heart_phenotype, by.x = "SAMPID")
+
+#Agregrate for mean
+Heart_mean <- aggregate(Heart_merge[, 2:19279], list(Heart_merge$AGE), mean)
+
+row.names(Heart_mean) <- NULL
+rownames(Heart_mean)=Heart_mean$Group.1
+Heart_mean=Heart_mean[,-1]
+Heart_mean_t <- as.data.frame(t(Heart_mean))
+Heart_mean_t <- tibble::rownames_to_column(Heart_mean_t, "Name")
+
+#Differentially expressed genes from ImpulseDE2
+#Heart-specific genes from HPA
+Heart_Impulse <- read.xlsx("/path/Heart/GTEx_ImpulseDE2_diff.xlsx")
+Heart_spec <- read.xlsx("/path/Tissuespecificgenes_enriched_enhanced.xlsx")
+
+#Subset IMPULSEDE2 diff genes
+Heart_Impulse_sub <- subset(Heart_mean_t, Name %in% Heart_Impulse$Heart_diff)
+
+#Subset tissue-specific genes- must first seperate ensembl ID from GTEx
+Heart_mean_sep <- Heart_mean_t %>% 
+     separate(Name, into = c("Name", "Second"), "[.]")
+
+Heart_mean_sep <- subset(Heart_mean_sep, select = -c(Second))
+Heart_spec_sub <- subset(Heart_mean_sep, Name %in% Heart_spec$Ensembl)
+
+#Add grouping
+Heart_Impulse_sub$Group <- "Heart_Differential"
+Heart_spec_sub$Group <-  "Heart_specific"
+
+Heart_merged_sub <- rbind(Heart_Impulse_sub, Heart_spec_sub)
+
+#Melt DF
+Heart_melt_df<- melt(Heart_merged_sub, id=c("Name", "Group"))
+
+#Data summary function for mean and standard error of mean
+# Function to calculate the mean and standard error
+  # for each group
+#+++++++++++++++++++++++++
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      std = std.error(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+Heart_Dsummary <- data_summary(Heart_melt_df, varname="value", 
+                    groupnames=c("Group","variable"))
+
+Heart_Dsummary$Group <- factor(Heart_Dsummary$Group, levels=c('Heart_specific', 'Heart_Differential'))
+
+#Standard error of mean
+p_Heart <- ggplot(Heart_Dsummary, aes(x=variable, y=value, group=Group, color=Group)) + 
+  geom_line() +
+  geom_point()+
+  expand_limits(y=0) +
+  geom_errorbar(aes(ymin=value-std, ymax=value+std), width=.2,
+                 position=position_dodge(0.05)) +
+  theme_classic() +
+  labs(x= "Age", y = "Normalized count (DESeq2 median-of-ratios")
+
+p_Heart + facet_grid(Group ~ ., scales = "free_y")
+
+#statistical testing
+-------------------**Heart-diff genes**----------------
+Heart_diffonly <- subset(Heart_melt_df, Group == "GTEx_Differential")
+#Anova
+Heart_anova1 <- aov(value ~ variable, Heart_diffonly)
+# Test summary
+summary(Heart_anova1)
+#Pairwise comparisons
+TukeyHSD(Heart_anova1)
+
+-------------------**Heart-specific genes**----------------
+Heart_speconly <- subset(Heart_melt_df, Group == "Heart_specific")
+#Anova
+Heart_anova1 <- aov(value ~ variable, Heart_speconly)
+# Test summary
+summary(Heart_anova1)
+#Pairwise comparisons
+TukeyHSD(Heart_anova1)
+```
+
+# Plots of normalized gene expression across different age groups
+# Brain
+```{r}
+Brain_GTEx <- read.xlsx("/path/Brain/gene_reads_2017-06-05_v8_Brain_filtered_proteincoding_FASTDEATH.xlsx")
+Brain_phenotype <- read.xlsx("/path/Brain/Brain_GTEx_phenotype_FASTDEATH.xlsx")
+
+#Moving genes names to row
+row.names(Brain_GTEx) <- NULL
+rownames(Brain_GTEx)=Brain_GTEx$Name
+Brain_GTEx=Brain_GTEx[,-1]
+head(Brain_GTEx)
+
+#DEseq2 analysis for normalization
+Brain_dds <- DESeqDataSetFromMatrix(countData = Brain_GTEx,
+                              colData = Brain_phenotype,
+                              design = ~AGE)
+
+Brain_dds <- DESeq(Brain_dds)
+
+#Obtaining normalized counts
+Brain_norm <- counts(Brain_dds, normalized = TRUE)
+Brain_norm <- as.data.frame(Brain_norm)
+Brain_norm_t <- as.data.frame(t(Brain_norm))
+Brain_norm_t <- tibble::rownames_to_column(Brain_norm_t, "SAMPID")
+
+#merge
+Brain_merge <- merge(Brain_norm_t, Brain_phenotype, by.x = "SAMPID")
+
+#Agregrate for mean across reps
+Brain_mean <- aggregate(Brain_merge[, 2:19279], list(Brain_merge$AGE), mean)
+
+row.names(Brain_mean) <- NULL
+rownames(Brain_mean)=Brain_mean$Group.1
+Brain_mean=Brain_mean[,-1]
+Brain_mean_t <- as.data.frame(t(Brain_mean))
+Brain_mean_t <- tibble::rownames_to_column(Brain_mean_t, "Name")
+
+#Differentially expressed genes from ImpulseDE2
+#Brain-specific genes from HPA
+Brain_Impulse <- read.xlsx("/path/Brain/GTEx_ImpulseDE2_diff.xlsx")
+Brain_spec <- read.xlsx("/path/Tissuespecificgenes_enriched_enhanced.xlsx")
+
+#Subset IMPULSEDE2 diff genes
+Brain_Impulse_sub <- subset(Brain_mean_t, Name %in% Brain_Impulse$Brain_diff)
+
+#Subset tissue-specific genes- must first seperate ensembl ID from GTEx
+Brain_mean_sep <- Brain_mean_t %>% 
+     separate(Name, into = c("Name", "Second"), "[.]")
+
+Brain_mean_sep <- subset(Brain_mean_sep, select = -c(Second))
+
+Brain_spec_sub <- subset(Brain_mean_sep, Name %in% Brain_spec$Ensembl)
+#Add grouping
+Brain_Impulse_sub$Group <- "Brain_Differential"
+Brain_spec_sub$Group <-  "Brain_specific"
+
+Brain_merged_sub <- rbind(Brain_Impulse_sub, Brain_spec_sub)
+
+#Melt DF
+Brain_melt_df<- melt(Brain_merged_sub, id=c("Name", "Group"))
+
+#Data summary function for mean and standard error of mean
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      std = std.error(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+Brain_Dsummary <- data_summary(Brain_melt_df, varname="value", 
+                    groupnames=c("Group","variable"))
+
+Brain_Dsummary$Group <- factor(Brain_Dsummary$Group, levels=c('Brain_specific', 'Brain_Differential'))
+
+#Standard error of mean
+p_Brain <- ggplot(Brain_Dsummary, aes(x=variable, y=value, group=Group, color=Group)) + 
+  geom_line() +
+  geom_point()+
+  expand_limits(y=0) +
+  geom_errorbar(aes(ymin=value-std, ymax=value+std), width=.2,
+                 position=position_dodge(0.05)) +
+  theme_classic() +
+  labs(x= "Age", y = "Normalized count (DESeq2 median-of-ratios")
+
+p_Brain + facet_grid(Group ~ ., scales = "free_y")
+
+#statistical testing
+-------------------**Brain-differential genes**----------------
+Brain_diffonly <- subset(Brain_melt_df, Group == "Brain_Differential")
+#Anova
+Brain_anova1 <- aov(value ~ variable, Brain_diffonly)
+# Test summary
+summary(Brain_anova1)
+#Pairwise comparisons
+TukeyHSD(Brain_anova1)
+
+-------------------**Brain-specific genes**----------------
+Brain_speconly <- subset(Brain_melt_df, Group == "Brain_specific")
+#Anova
+Brain_anova2 <- aov(value ~ variable, Brain_speconly)
+# Test summary
+summary(Brain_anova2)
+#Pairwise comparisons
+TukeyHSD(Brain_anova2)
+```
+
+
