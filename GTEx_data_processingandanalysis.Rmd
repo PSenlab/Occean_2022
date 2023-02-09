@@ -54,7 +54,7 @@ write.xlsx(merged_liver, "/path/Liver/Liver_GTEx_phenotype_FASTDEATH.xlsx")
 ```
 
 # Brain-cortex
-```{bash}
+```{r}
 #SubjID
 #Brain GTEx is the samples from the gene read counts- with two columns - to match to phenotype data
 Brain_GTEx <- read.xlsx("/path/Brain_cortex/Brain_GTEx_RNAsamp.xlsx")
