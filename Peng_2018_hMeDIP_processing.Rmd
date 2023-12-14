@@ -54,8 +54,10 @@ vitaminC=${indir}/bigwig/VC_sort_rmdup_MAPQ20.bw
 
 #Regions
 ##Bed file with genes with low abs mRNA fold change from RNA-seq data
+##Bed file format was obtained from UCSC genome browser
 low_abs_mRNA_lFC=${indir}/bigwig/Peng_RNA_LFC_abs_low.bed
 ##Bed file with genes with high abs mRNA fold change from RNA-seq data
+##Bed file format was obtained from UCSC genome browser
 high_abs_mRNA_hFC=${indir}/bigwig/Peng_RNA_LFC_abs_high.bed
 
 cores=20
