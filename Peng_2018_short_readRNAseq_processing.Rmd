@@ -221,3 +221,46 @@ counts_proC <- counts_DF %>% semi_join(gene_type_proC, by = "GeneID") # keep row
 
 write.xlsx(counts_proC, file=paste0(path,"/genecount/Peng_VitaminC_RNAseq_genecount_hg19.xlsx"), rowNames=TRUE)
 ```
+
+# Differential gene expression using DESeq2 (performed according to vignette by Michael I. Love, Simon Anders, and Wolfgang Huber)
+#https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+```{r}
+#Moving genes names to row
+row.names(counts_proC) <- NULL
+rownames(counts_proC)=counts_proC$GeneID
+counts_proC=counts_proC[,-1]
+head(counts_proC)
+
+Group <- c(rep("control", times = 2), rep("vitaminC", times = 2))
+Col <- as.data.frame(cbind(colnames(RNAseq),Group))
+
+#DESeq design
+dds <- DESeqDataSetFromMatrix(countData = RNAseq,
+                              colData = Col,
+                              design = ~Group)
+
+dds <- DESeq(dds)
+dds <- DESeq(dds)
+resultsNames(dds)
+
+#Differential analysis results
+res_DF <- as.data.frame(res)
+res_DF <- tibble::rownames_to_column(res_DF, "geneID")
+write.xlsx(res_DF, "/path/DESeq2_DiffAnalysis.xlsx")
+```
+
+
+# Ranking/categorizing DESeq2 results by absolute fold change
+```{r}
+res_DF$foldchange_abs <- abs(res_DF$log2FoldChange)
+
+RNAseq_absLFC <- res_DF %>%
+  mutate(LFC_quantile_abs = ntile(foldchange_abs, 3))
+  
+#subset
+RNA_absLFC_1 <- subset(RNAseq_absLFC, LFC_quantile_abs == "1")
+RNA_absLFC_3 <- subset(RNAseq_absLFC, LFC_quantile_abs == "3")
+
+write.table(RNA_absLFC_1$geneID, "/path/RNA_absLFC_1.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+write.table(RNA_absLFC_3$geneID, "/path/RNA_absLFC_3.txt", row.names = FALSE, quote = FALSE, col.names = FALSE)
+```
