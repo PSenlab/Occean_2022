@@ -2,6 +2,7 @@
 ***
 # Description
 **Scripts used to process and analyze RNA-seq data obtained from Peng et al. 2018.**
+#fastq files were obtained by contacting authors of
 #Peng, D., Ge, G., Gong, Y. et al. Vitamin C increases 5-hydroxymethylcytosine level and inhibits the growth of bladder cancer. Clin Epigenet 10, 94 (2018). https://doi.org/10.1186/s13148-018-0527-7
 
 ## Packages
