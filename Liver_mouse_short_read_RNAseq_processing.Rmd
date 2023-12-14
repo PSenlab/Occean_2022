@@ -225,7 +225,8 @@ counts_proC <- counts_DF %>% semi_join(gene_type_proC, by = "GeneID") # keep row
 write.xlsx(counts_proC, "/path/RNAseq_gene_counttable.xlsx")
 ```
 
-# Differential gene expression
+# Differential gene expression using DESeq2 (performed according to vignette by Michael I. Love, Simon Anders, and Wolfgang Huber)
+#https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
 ```{r}
 #Moving genes names to row
 row.names(counts_proC) <- NULL
