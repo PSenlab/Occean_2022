@@ -1,5 +1,6 @@
 # Introduction
 **Scripts used to process and analyze GTEx RNA-seq data**
+#GTEx data were obtained via portal https://www.gtexportal.org/home/downloads/adult-gtex
 
 ### R packages
 ```{r}
