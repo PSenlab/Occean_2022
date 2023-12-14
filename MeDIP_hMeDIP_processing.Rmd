@@ -4,7 +4,6 @@
 
 ## Packages
 ```{bash}
-# Biowulf packages 
 trimgalore/0.6.6
 fastqc/0.11.9
 multiqc/1.9
