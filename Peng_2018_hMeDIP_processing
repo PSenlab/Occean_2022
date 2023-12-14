@@ -1,0 +1,74 @@
+***
+# Description
+**Scripts used to process and analyze hMeDIP-seq data obtained from Peng et al. 2018.**
+#hMeDIP-seq bam files were obtained by contacting authors of
+#Peng, D., Ge, G., Gong, Y. et al. Vitamin C increases 5-hydroxymethylcytosine level and inhibits the growth of bladder cancer. Clin Epigenet 10, 94 (2018). 
+#https://doi.org/10.1186/s13148-018-0527-7
+
+## Packages
+```{bash}
+samtools/1.9
+bedtools/2.30.0
+deeptools/3.5.0
+```
+
+
+# Creating bigwig files
+```{bash}
+#Set inputs
+indir=$1
+
+dos2unix ${indir}/sample_Peng.txt
+cat ${indir}/sample_Peng.txt
+
+INPUT1=${indir}/bam/*_sort_rmdup_MAPQ20.bam
+mkdir -p ${indir}/bigwig
+
+##Index bam files
+for i in $INPUT1
+do
+  base=$(basename $i)
+  samtools index $i
+done
+
+#Bigwig Files
+for i in $INPUT1
+do
+  base=$(basename $i)
+  sample_name=${base%%.*}
+  bamCoverage -b $i -o ${indir}/bigwig/${sample_name}.bw -of bigwig \
+  --effectiveGenomeSize 2864785220 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
+done
+```
+
+
+# metaplot of 5hmC signal over gene body
+```{bash}
+mkdir -p ${indir}/figures
+mkdir -p ${indir}/metaplots
+
+#score files (bigwig)
+#Individual samples
+control=${indir}/bigwig/CON_sort_rmdup_MAPQ20.bw
+vitaminC=${indir}/bigwig/VC_sort_rmdup_MAPQ20.bw
+
+#Regions
+##Bed file with genes with low abs mRNA fold change from RNA-seq data
+low_abs_mRNA_lFC=${indir}/bigwig/Peng_RNA_LFC_abs_low.bed
+##Bed file with genes with high abs mRNA fold change from RNA-seq data
+high_abs_mRNA_hFC=${indir}/bigwig/Peng_RNA_LFC_abs_high.bed
+
+cores=20
+colors_hex="#000000 #FF0000"
+
+#Control
+#Computing matrix with the scale parameter for hmC samples
+computeMatrix scale-regions -S ${control} ${vitaminC} -R ${low_abs_mRNA_lFC} ${high_abs_mRNA_hFC} \
+--beforeRegionStartLength 3000 --regionBodyLength 5000 --afterRegionStartLength 3000 \
+--skipZeros --missingDataAsZero -o ${indir}/metaplots/mRNA_absLFC_5hmC.mat.gz -p $cores
+
+#Metaplot
+plotProfile -m ${indir}/metaplots/mRNA_absLFC_5hmC.mat.gz \
+-o ${indir}/figures/Peng_mRNA_absLFC_5hmC_metaplot.pdf --legendLocation upper-left \
+--plotHeight 15 --plotWidth 20 --plotTitle "Peng 5hmC over abs LFC mRNA" --colors $colors_hex --perGroup
+```
