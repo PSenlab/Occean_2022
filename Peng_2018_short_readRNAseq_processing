@@ -1,0 +1,221 @@
+
+***
+# Description
+**Scripts used to process and analyze RNA-seq data obtained from Peng et al. 2018.**
+#Peng, D., Ge, G., Gong, Y. et al. Vitamin C increases 5-hydroxymethylcytosine level and inhibits the growth of bladder cancer. Clin Epigenet 10, 94 (2018). https://doi.org/10.1186/s13148-018-0527-7
+
+## Packages
+### Linux packages
+```{bash}
+fastqc/0.11.9
+multiqc/1.9
+java/12.0.1
+trimmomatic/0.39
+STAR/2.7.5b
+picard/2.20.8
+samtools/1.10
+deeptools/3.5.0
+R/4.3.0
+```
+
+### R packages
+```{r}
+library(openxlsx)
+library(Rsubread) #/2.6.4
+library(gtools) #/3.9.2
+library(DESeq2) #/1.30.1
+library(tibble) #/3.1.7
+library(dplyr) #/1.0.9
+```
+
+
+# Data Pre-processing
+```{bash}
+#Set inputs
+indir=$1
+
+#txt with sample names
+dos2unix ${indir}/sample_Peng.txt
+cat ${indir}/sample_Peng.txt
+```
+
+
+## Adapter trimming
+```{bash}
+mkdir -p ${indir}/adapt_trim
+
+for sample_names in $(cat ${indir}/sample_Peng.txt)
+do
+  java -jar $TRIMMOJAR PE -threads 24 -phred33 ${indir}/${sample_names}_1.clean.fq.gz \
+  ${indir}/${sample_names}_2.clean.fq.gz ${indir}/adapt_trim/${sample_names}_trimmed_R1_paired.fq.gz \
+  ${indir}/adapt_trim/${sample_names}_trimmed_R1_unpaired.fq.gz ${indir}/adapt_trim/${sample_names}_trimmed_R2_paired.fq.gz \
+  ${indir}/adapt_trim/${sample_names}_trimmed_R2_unpaired.fq.gz \
+  ILLUMINACLIP:${indir}/adapters/TruSeq_and_nextera_adapters.fa:3:50:10 LEADING:10 TRAILING:10 SLIDINGWINDOW:4:20 MAXINFO:50:0.8 MINLEN:25
+#remove unpaired fastqs
+  rm ${indir}/adapt_trim/*_unpaired.fq.gz
+done
+```
+
+
+# Alignment using STAR
+```{bash}
+## Alignment to hg19 (Gencode, GRCh37.p13)
+#FASTA file: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/GRCh37.p13.genome.fa.gz
+#GTF file: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/gencode.v19.annotation.gtf.gz
+
+#Removing mitochondrial chromosomes from gtf file
+grep -v '^chrM' ${indir}/genome_hg19/gencode.v19.annotation.gtf > ${indir}/genome_hg19/gencode.v19.annotation_nochromM.gtf
+
+mkdir ${indir}/bam
+mkdir ${indir}/bam/logs
+chmod -R 777 ${indir}/bam/logs
+
+for sample_names in $(cat ${indir}/sample_Peng.txt)
+do
+   STAR --genomeDir /path/genome_hg19/star_genome \
+   --readFilesIn ${indir}/adapt_trim/${sample_names}_trimmed_R1_paired.fq.gz \
+   ${indir}/adapt_trim/${sample_names}_trimmed_R2_paired.fq.gz \
+   --readFilesCommand zcat --outTmpDir ${indir}/bam/logs/${sample_names}_STAR --outSAMunmapped Within \
+   --outFilterType BySJout --outFilterMultimapNmax 20 --outFilterMismatchNmax 999 \
+   --outFilterMismatchNoverLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 \
+   --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --sjdbScore 1 --runThreadN 24\
+   --outSAMtype BAM SortedByCoordinate \
+   --quantMode TranscriptomeSAM --sjdbGTFfile /path/genome_hg19/gencode.v19.annotation_nochromM.gtf --sjdbGTFfeatureExon exon \
+   --outFileNamePrefix ${indir}/bam/${sample_names}_
+done
+```
+
+
+# Removing duplicates using Picard
+```{bash}
+#Obtained refFlat file from https://hgdownload.cse.ucsc.edu/goldenpath/hg19/database/refFlat.txt.gz
+mkdir ${indir}/RefFlat
+mkdir ${indir}/bam/metric
+
+wget -O ${indir}/RefFlat/hg19_refFlat.txt.gz https://hgdownload.cse.ucsc.edu/goldenpath/hg19/database/refFlat.txt.gz
+gunzip ${indir}/RefFlat/hg19_refFlat.txt.gz
+
+for sample_names in $(cat ${indir}/sample_Peng.txt)
+do
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  CollectRnaSeqMetrics \
+   REF_FLAT=${indir}/RefFlat/hg19_refFlat.txt \
+   INPUT=${indir}/bam/${sample_names}_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${indir}/bam/metric/${sample_names}_RnaSeqMetrics.txt \
+   STRAND=NONE
+
+#remove duplicates
+   java -jar /usr/local/apps/picard/2.20.8/picard.jar  MarkDuplicates \
+   INPUT=${indir}/bam/${sample_names}_Aligned.sortedByCoord.out.bam \
+   OUTPUT=${indir}/bam/${sample_names}_Aligned.out.MKDUP.bam \
+   METRICS_FILE=${indir}/bam/metric/${sample_names}_RnaSeqMetrics.txt ASSUME_SORTED=true \
+   MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=1000    REMOVE_DUPLICATES=true \
+   REMOVE_SEQUENCING_DUPLICATES=true
+done
+```
+
+
+# Filter bam files
+```{bash}
+for sample_names in $(cat ${indir}/sample_Peng.txt)
+do
+  samtools view -@ 12 -b -f 2 -q 10 ${indir}/bam/${sample_names}_Aligned.out.MKDUP.bam | \
+  samtools view -@ 12 -b  >| ${indir}/bam/${sample_names}_filtered.bam 
+done
+```
+
+
+# Generating bigwig files
+```{bash}
+mkdir -p ${indir}/bigwig
+
+#Index bam files
+INPUT=${indir}/bam/*_filtered.bam
+
+for i in $INPUT
+do
+samtools index $i
+done
+
+for sample_names in $(cat ${indir}/sample_Peng.txt)
+do
+  bamCoverage -b ${indir}/bam/${sample_names}_filtered.bam  -o ${indir}/bigwig/${sample_names}_filtered.bw -of bigwig \
+  --effectiveGenomeSize 2864785220 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
+done
+
+#Creating merged bam for merged bigwig files
+mkdir -p ${indir}/bam/merged_bam
+mkdir -p ${indir}/bigwig/merged_bam_wig
+
+##Control
+Control=(${indir}/bam/Control?_filtered.bam*)
+
+##Vitamin C
+VC=(${indir}/bam/VC_?_filtered.bam*)
+
+##Control
+samtools merge ${indir}/bam/merged_bam/Control_RNA_merged.bam $Control
+
+##Vitamin C
+samtools merge ${indir}/bam/merged_bam/VC_RNA_merged.bam $VC
+
+
+INPUT1=${indir}/bam/merged_bam/*.bam
+
+#Index bam files
+for i in $INPUT1
+do
+echo "index: " $i
+base=$(basename $i)
+samtools index $i
+done
+
+#Merged bigwig Files
+for i in $INPUT1
+do
+echo "bigwig: " $i
+base=$(basename $i)
+sample_name=${base%%.*}
+bamCoverage -b $i -o ${indir}/bigwig/merged_bam_wig/${sample_name}.bw -of bigwig \
+--effectiveGenomeSize 2864785220 --extendReads 200 --normalizeUsing RPKM -p $SLURM_CPUS_PER_TASK
+done
+
+ls -l ${indir}/bigwig/merged_bam_wig/*
+```
+
+
+# obtaining gene counts
+```{r}
+#FeatureCounts
+path = "/path/to/samples"
+
+RNAseq_bam <-list.files(paste0(path, "/bam/"), pattern="*_filtered.bam$", full.name=T)
+RNAseq_bam <- mixedsort(RNAseq_bam)
+RNAseq_bam
+
+#Using hg19 gencode comprehensive GTF (Release 19 (GRCh37.p13))
+features <- featureCounts(files=RNAseq_bam,
+                          annot.ext="/path/genome_hg19/gencode.v19.annotation_nochromM.gtf",
+                          isGTFAnnotationFile = TRUE,
+                          GTF.featureType = "exon",
+                          GTF.attrType = "gene_name",
+                          GTF.attrType.extra = "gene_type",
+                          nthreads=12,
+                          isPairedEnd = T,checkFragLength = T,requireBothEndsMapped = T)
+
+counts <- features$counts
+
+sample_filename <- colnames(counts)
+sample_name <- gsub("_filtered.bam","",sample_filename)
+sample_name <- gsub("\\.","_",sample_name)
+
+colnames(counts) <- sample_name
+
+counts_DF <- as.data.frame(counts)
+counts_DF <- tibble::rownames_to_column(counts_DF, "GeneID")
+
+gene_type <- features$annotation[,c("GeneID", "gene_type")]
+gene_type_proC <- gene_type[grepl("protein_coding", gene_type$gene_type),]
+counts_proC <- counts_DF %>% semi_join(gene_type_proC, by = "GeneID") # keep rows with matching ID
+
+write.xlsx(counts_proC, file=paste0(path,"/genecount/Peng_VitaminC_RNAseq_genecount_hg19.xlsx"), rowNames=TRUE)
+```
