@@ -3,6 +3,7 @@
 **Scripts used to process and analyze hMeDIP and MeDIP-seq data for differentially enriched regions**
 
 ## Packages
+### Linux packages
 ```{bash}
 trimgalore/0.6.6
 fastqc/0.11.9
@@ -12,10 +13,10 @@ samtools/1.9
 picard/2.23.7
 bedtools/2.30.0
 deeptools/3.5.0
+bwtool/1.0
 ```
-
+### R packages
 ```{r}
-# R packages
 library(tidyverse)
 library(openxlsx)
 library(qsea) #/1.26.0
@@ -505,3 +506,17 @@ png(file = "/path/liver_5hmC_hMeDIP_volcanoplot_QSEA.png", units = "in",
 print(p_liver_5hmC)
 dev.off()
 ```
+
+
+# 5hmC signal quantification from input subtracted bigwig
+```{bash}
+#gene_coordinate.txt contains chromosome, start, and position
+for hMeDIP_names in $(cat hMeDIP_names.txt)
+do
+  bwtool summary /path/gene_coordinate.txt \
+  ${path}/bigwig/${hMeDIP_names}_unique.bw /path/AUC_summary/${hMeDIP_names}_AUC.txt \
+  -header -with-sum
+done
+```
+
+
