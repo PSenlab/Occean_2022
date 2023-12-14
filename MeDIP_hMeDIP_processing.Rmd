@@ -463,7 +463,7 @@ result_all=makeTable(qseaSet_blind,
 ```
 
 
-#Volcano plot
+# Volcano plot
 ```{r}
 #Subsetting for relevant columns
 liver_5hmC_sub <- result_all[,c(1,2,3,10,6,7)]
