@@ -1,6 +1,6 @@
 ***
 # Introduction
-**Scripts used to process and analyze hMeDIP and MeDIP-seq data**
+**Scripts used to process and analyze hMeDIP and MeDIP-seq data for differentially enriched regions**
 
 ## Packages
 ```{bash}
@@ -13,14 +13,17 @@ samtools/1.9
 picard/2.23.7
 bedtools/2.30.0
 deeptools/3.5.0
-macs/2.2.7.1
 ```
 
 ```{r}
 # R packages
 library(tidyverse)
-library(DiffBind) #/3.0.15
 library(openxlsx)
+library(qsea) #/1.26.0
+library(BSgenome) #/1.68.0
+library(BSgenome.Mmusculus.UCSC.mm10) #/1.4.3
+library(GenomicRanges) #/1.52.0
+library(ggplot2) #/3.4.2
 ```
 
 # Data Pre-processing
@@ -382,73 +385,124 @@ bigwigCompare -b1 ${OLD_5hmC[$i]} -b2 ${OLD_INPUT[$i]} --operation subtract -o $
 done
 ```
 
-# broad and narrow peak calling using MACS2
-```{bash}
-mkdir -p ${path}/Macs2_peaks_001
-OUTPUT1="${path}/Macs2_peaks_001/"
 
-Y_O_5hmC=(${path}/bam/*??_5hmC_unique_noDUP_B.bam)
-Y_O_INPUT=(${path}/bam/*??_input_unique_noDUP_B.bam)
+# QSEA analysis (performed according to tutorial by Matthias Lienhard, Lukas Chavez and Ralf Herwig)
+#https://bioconductor.org/packages/devel/bioc/vignettes/qsea/inst/doc/qsea_tutorial.html
+```{r}
+BSgenome="BSgenome.Mmusculus.UCSC.mm10"
 
-#5hmC and Input
-for i in $(seq 0 $((${#Y_O_5hmC[@]}-1)))
-do
-base=$(basename ${Y_O_5hmC[$i]})
-sample_name=${base%%.*}
-base1=$(basename ${Y_O_INPUT[$i]})
-sample_name1=${base1%%.*}
-macs2 callpeak -t ${Y_O_5hmC[$i]} -c ${Y_O_INPUT[$i]} -n ${sample_name}_${sample_name1} --outdir $OUTPUT1 -f BAMPE -g 1.87e9 -B --broad -q 0.001 --broad-cutoff 0.001
-done
+#dataframe containing meta data and path to IP and corresponding input bam files
+sample_liver <- read.xlsx("/path/liver_sample.xlsx")
+
+#specifying chromosomes to process
+chr.select=c(paste0("chr", 1:19), "chrX", "chrY")
+
+#creating qseaSet object that contains sample and enrichment information
+qseaSet=createQseaSet(sampleTable=sample_liver, 
+        BSgenome="BSgenome.Mmusculus.UCSC.mm10", 
+        chr.select=chr.select, 
+        window_size=400)
+
+#compute MeDIP coverage for each window
+qseaSet=addCoverage(qseaSet, uniquePos=TRUE, paired=TRUE)
+
+#CNV normalization
+qseaSet=addCNV(qseaSet, file_name="input_files",window_size=2e6, 
+        paired=TRUE, parallel=FALSE, MeDIP=TRUE)
+
+#sequencing depth and library composition normalization
+qseaSet=addLibraryFactors(qseaSet)
+
+#estimate the average CpG density per fragment for each genomic window.
+qseaSet=addPatternDensity(qseaSet, "CG", name="CpG")
+
+#from the regions without CpGs we can estimate the coverage offset from background reads.
+qseaSet = addOffset(qseaSet, enrichmentPattern = "CpG")
+
+#estimate the relative enrichment using rough estimates (“blind calibration” method)
+wd=which(getRegions(qseaSet)$CpG_density>1 &
+    getRegions(qseaSet)$CpG_density<15)
+signal=(15-getRegions(qseaSet)$CpG_density[wd])*.55/15+.25
+
+qseaSet_blind=addEnrichmentParameters(qseaSet, enrichmentPattern="CpG", 
+    windowIdx=wd, signal=signal)
+
+#model parameters estimated by QSEA, which describe the signal to noise ratio, and the enrichment efficiency
+getOffset(qseaSet_blind, scale="fraction")
+
+#CpG enrichment
+plotEPmatrix(qseaSet_blind)
+
+#Differential Methylation Analysis
+design=model.matrix(~group, getSampleTable(qseaSet_blind) )
+qseaGLM=fitNBglm(qseaSet_blind, design, norm_method="beta")
+qseaGLM=addContrast(qseaSet_blind,qseaGLM, coef=2, name="OldvsYoung" )
+
+#significant testing
+sig=isSignificant(qseaGLM, fdr_th=.05)
+
+sigList_gain <- isSignificant(qseaGLM, fdr_th=0.05, direction="gain", absLogFC_th = 1)
+sigList_lost <- isSignificant(qseaGLM, fdr_th=0.05, direction="loss", absLogFC_th = 1)
+
+result_gain=makeTable(qseaSet_blind, 
+    glm=qseaGLM, 
+    groupMeans=getSampleGroups(qseaSet_blind), 
+    keep=sigList_gain, 
+    norm_method="nrpkm")
+
+result_loss=makeTable(qseaSet_blind, 
+    glm=qseaGLM, 
+    groupMeans=getSampleGroups(qseaSet_blind), 
+    keep=sigList_loss, 
+    norm_method="nrpkm")
+
+result_all=makeTable(qseaSet_blind, 
+    glm=qseaGLM, 
+    groupMeans=getSampleGroups(qseaSet_blind), 
+    norm_method="nrpkm")
 ```
 
-# DiffBind analysis (performed according to vignette by Rory Stark and Gord Brown)
+
+#Volcano plot
 ```{r}
-# Reading in the peaksets obtained from Macs2
-samples <- read.csv("/path/hMeDIP_DiffBind_SampleSheet_unique.csv")
+#Subsetting for relevant columns
+liver_5hmC_sub <- result_all[,c(1,2,3,10,6,7)]
 
-#Create a DBA object by reading the peaksets with the dba DiffBind function
-DBdata <- dba(sampleSheet=samples)
-DBdata
+liver_5hmC_sub$group = ifelse(liver_5hmC_sub$OldvsYoung_adjPval < 0.05 & abs(liver_5hmC_sub$OldvsYoung_log2FC) >= 1, 
+                             ifelse(liver_5hmC_sub$OldvsYoung_log2FC >= 1 ,'hyper DHMR, n=16315','hypo DHMR, n=13592'),
+                             'N/S')
 
-#Correlation heatmap of the MACS2 peaks initial clustering of the samples using the cross-correlations of each row of the binding matrix
-peak_heat <- plot(DBdata)
-peak_heat
+liver_5hmC_sum <- as.data.frame(summary(as.factor(liver_5hmC_sub$group)))
 
-# Counting reads
-DBdata_count <- dba.count(DBdata, bParallel=FALSE, summits=110)
+#log transformation of FDR
+liver_5hmC_sub$neglog10pval <- -log10(liver_5hmC_sub$YoungvsOld_adjPval)
+liver_5hmC_sub_NA <- na.omit(liver_5hmC_sub)
 
-#Correlation heatmap, using affinity (read count) data instead of peak score
-hMeDIP_ReadCount_heatmapCor <- plot(DBdata_count)
-hMeDIP_ReadCount_heatmapCor
+#plot
+p_liver_5hmC <- ggplot(data = liver_5hmC_sub_NA, 
+                      aes(x = OldvsYoung_log2FC, 
+                          y = neglog10pval, 
+                          colour=group)) +
+  geom_point(size=6, shape = 19, alpha=0.7) +
+  scale_color_manual(values=c("#FA8072", "black", "lightgrey"))+
+  xlim(c(-5, 5)) +
+  #geom_vline(xintercept=c(-1,1),linetype="dashed",col="black",lwd=1) +
+  geom_hline(yintercept = 1.301,col="black",lwd=2, lty=4) +
+  labs(x="log2 Fold Change (old/young)",
+       y="-log10 (pval)",
+       title="liver hMeDIP (FDR < 0.05))")  +
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        legend.position="top", 
+        legend.title = element_blank(),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.title.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 18, color = "black"),
+        legend.text = element_text(size = 18, color = "black"))
 
-#Number of reads that overlap a consensus peak
-info <- dba.show(DBdata_count)
-libsizes <- cbind(LibReads=info$Reads, FRiP=info$FRiP, PeakReads=round(info$Reads * info$FRiP))
-rownames(libsizes) <- info$ID
-
-#Normalizing the data
-DBdata_norm <- dba.normalize(DBdata_count, method=DBA_DESEQ2)
-
-#Establishing a model design and contrast
-#"Young" is the reference group
-DBdata_cont <- dba.contrast(DBdata_norm, minMembers = 4,
-                       reorderMeta=list(Condition="Young"))
-
-#Performing differential analysis
-DBdata_analyze <- dba.analyze(DBdata_cont)
-dba.show(DBdata_analyze, bContrasts=TRUE)
-
-#Saving and retrieving the differentially bound sites
-DBdata.db_sites <- dba.report(DBdata_analyze)
-
-#Save peak files- BED file can be used for peak annotation
-Diff_peaks <- as.data.frame(DBdata.db_sites)
-write.csv(Diff_peaks, file="/path/hMeDIP_peaks_110_unique.csv", row.names=T)
-
-#Saving and retrieving all the sites
-DBdata.db_sites_all <- dba.report(DBdata_analyze, th=1)
-DBdata.db_sites_all
-
-All_peaks <- as.data.frame(DBdata.db_sites_all)
-write.csv(All_peaks, file="/path/hMeDIP_All_peaks_110_unique.csv", row.names=T)
+png(file = "/path/liver_5hmC_hMeDIP_volcanoplot_QSEA.png", units = "in",
+    width = 15, height = 8.5, res = 800)
+print(p_liver_5hmC)
+dev.off()
 ```
